@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Lumina image</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 52rem; margin: 2rem auto; padding: 0 1rem; }
+    textarea { width: 100%; min-height: 8rem; box-sizing: border-box; }
+    button { margin-top: 0.5rem; padding: 0.4rem 0.8rem; }
+    #status { margin-top: 1rem; white-space: pre-wrap; color: #444; }
+    #results { margin-top: 1.5rem; }
+    #results img { max-width: 100%; border: 1px solid #ccc; }
+    .hint { font-size: 0.85rem; color: #666; margin-bottom: 0.35rem; }
+  </style>
+</head>
+<body>
+  <h1>Neta Lumina image</h1>
+  <p class="hint">
+    ComfyUI must be running with the Lumina workflow (anime.json). Add tags + description (e.g. virtual youtuber, 1girl, outfit, best quality).
+  </p>
+  <label for="prompt">User prompt</label>
+  <textarea id="prompt" placeholder="neta, 1girl, solo, virtual youtuber, ..."></textarea>
+  <div>
+    <button id="run" type="button">Generate</button>
+  </div>
+  <div id="status"></div>
+  <div id="results"></div>
+  <script>
+    const promptEl = document.getElementById('prompt');
+    const statusEl = document.getElementById('status');
+    const resultsEl = document.getElementById('results');
+    const runBtn = document.getElementById('run');
+
+    runBtn.addEventListener('click', async () => {
+      const prompt = promptEl.value.trim();
+      if (!prompt) {
+        statusEl.textContent = 'Enter a prompt.';
+        return;
+      }
+      statusEl.textContent = 'Running Lumina on ComfyUI (this can take a few minutes)...';
+      resultsEl.innerHTML = '';
+      runBtn.disabled = true;
+      try {
+        const res = await fetch('/api/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt }),
+        });
+        const text = await res.text();
+        let data;
+        try {
+          data = JSON.parse(text);
+        } catch {
+          throw new Error(text.slice(0, 500) || 'Non-JSON response');
+        }
+        if (!res.ok) {
+          const detail = data.detail != null ? (typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail)) : text;
+          throw new Error(detail);
+        }
+        statusEl.textContent = 'Done.';
+        resultsEl.innerHTML = '';
+        const img = document.createElement('img');
+        img.src = data.image_url;
+        img.alt = 'Lumina output';
+        resultsEl.appendChild(img);
+      } catch (e) {
+        statusEl.textContent = 'Error: ' + (e && e.message ? e.message : String(e));
+      } finally {
+        runBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
