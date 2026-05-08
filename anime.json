@@ -14,7 +14,7 @@
   },
   "48:32": {
     "inputs": {
-      "shift": 4,
+      "shift": 3,
       "model": [
         "48:34",
         0
@@ -29,9 +29,9 @@
     "inputs": {
       "seed": 455747493073090,
       "steps": 30,
-      "cfg": 4,
+      "cfg": 4.5,
       "sampler_name": "res_multistep",
-      "scheduler": "simple",
+      "scheduler": "linear_quadratic",
       "denoise": 1,
       "model": [
         "48:32",
@@ -74,7 +74,7 @@
   },
   "48:35:41": {
     "inputs": {
-      "value": "You are an assistant designed to generate low-quality images based on textual prompts. <Prompt Start> "
+      "value": "You are an assistant designed to generate low-quality images based on textual prompts <Prompt Start> "
     },
     "class_type": "PrimitiveStringMultiline",
     "_meta": {
@@ -83,7 +83,7 @@
   },
   "48:35:42": {
     "inputs": {
-      "value": "blurry, worst quality, low quality, jpeg artifacts, signature, watermark, username, error, deformed hands, bad anatomy, extra limbs, poorly drawn hands, poorly drawn face, mutation, deformed, extra eyes, extra arms, extra legs, malformed limbs, fused fingers, too many fingers, long neck, cross-eyed, bad proportions, missing arms, missing legs, extra digit, fewer digits, cropped, normal quality"
+      "value": "blurry, worst quality, low quality, deformed hands, bad anatomy, extra limbs, poorly drawn face, mutated, extra eyes, bad proportions, chibi, super deformed, from behind, back view, profile, side view, cropped, close-up, headshot"
     },
     "class_type": "PrimitiveStringMultiline",
     "_meta": {
@@ -177,7 +177,7 @@
   },
   "48:51": {
     "inputs": {
-      "value": "neta, 1girl, solo, virtual youtuber, long hair, bangs, gentle smile, looking at viewer, upper body, soft lighting, clean background, best quality"
+      "value": "neta, 1girl, solo, virtual youtuber, beautiful detailed eyes, gentle smile, zoomed out, upper body, bust visible, front view, both shoulders towards viewer, soft lighting, clean background, best quality"
     },
     "class_type": "PrimitiveStringMultiline",
     "_meta": {

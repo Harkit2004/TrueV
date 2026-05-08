@@ -1,21 +1,23 @@
 from __future__ import annotations
 
 import json
+import logging
 import secrets
 import shutil
+from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlencode
-from typing import Any
+from typing import Any, AsyncIterator
 
 import httpx
-from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Query, Request, UploadFile
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
 from src.comfy_client import (
     fetch_view_bytes,
-    pick_first_by_extension,
     pick_first_from_node,
     prepare_workflow_for_api,
     queue_prompt,
@@ -24,9 +26,40 @@ from src.comfy_client import (
 from src.see_through_jobs import run_see_through_decompose_job
 from src.see_through_proxy import proxy_decompose_to_remote
 from src.settings import Settings, get_settings
+from src.stretchy_export import build_decompose_attachment_bytes
 
 
 STATIC_DIR = Path(__file__).resolve().parents[1] / "static"
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    log = logging.getLogger("uvicorn.error")
+    s = get_settings()
+    wf = s.lumina_workflow_path.expanduser()
+    try:
+        wf = wf.resolve()
+    except OSError:
+        pass
+    log.info(
+        "Lumina: comfy=%s workflow=%s workflow_exists=%s",
+        s.comfyui_base_url,
+        wf,
+        wf.is_file(),
+    )
+    st_url = (s.see_through_service_url or "").strip()
+    if st_url:
+        log.info("See-through: requests proxied to worker at %s", st_url)
+    elif s.see_through_repo is not None:
+        log.info("See-through: local inference repo=%s", s.see_through_repo.expanduser())
+    else:
+        log.info(
+            "See-through: not configured (set SEE_THROUGH_SERVICE_URL or SEE_THROUGH_REPO in backend/.env)"
+        )
+    st_root = s.stretchy_studio_root
+    if st_root is not None:
+        log.info("Stretchy headless: studio root=%s", st_root.expanduser())
+    yield
 
 
 def random_comfy_seed() -> int:
@@ -51,40 +84,79 @@ class GenerateResponse(BaseModel):
 
 
 async def _run_lumina_pipeline(settings: Settings, body: GenerateRequest) -> dict[str, Any]:
-    anime_path = settings.anime_path()
+    anime_path = settings.lumina_workflow_path.expanduser()
+    try:
+        anime_path = anime_path.resolve()
+    except OSError:
+        pass
     if not anime_path.is_file():
-        raise HTTPException(status_code=500, detail=f"Missing anime workflow: {anime_path}")
-
-    anime_wf = prepare_workflow_for_api(json.loads(anime_path.read_text(encoding="utf-8")))
-    anime_wf["48:51"]["inputs"]["value"] = body.prompt
-    anime_wf["48:33"]["inputs"]["seed"] = random_comfy_seed()
-
-    async with httpx.AsyncClient(
-        base_url=settings.comfyui_base_url.rstrip("/"),
-        timeout=httpx.Timeout(settings.workflow_timeout_sec, connect=60.0),
-    ) as client:
-        pid = await queue_prompt(client, anime_wf)
-        out = await wait_for_outputs(
-            client,
-            pid,
-            poll_interval=settings.poll_interval_sec,
-            timeout_sec=settings.workflow_timeout_sec,
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"Missing Lumina workflow JSON: {anime_path}. "
+                "Use repo-root anime.json or set LUMINA_WORKFLOW_PATH in backend/.env, then restart."
+            ),
         )
-        try:
-            return pick_first_from_node(
-                out,
-                "9",
-                extensions=(".png", ".jpg", ".jpeg", ".webp"),
+
+    try:
+        anime_wf = prepare_workflow_for_api(json.loads(anime_path.read_text(encoding="utf-8")))
+        anime_wf["48:51"]["inputs"]["value"] = body.prompt.strip()
+        anime_wf["48:33"]["inputs"]["seed"] = random_comfy_seed()
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Invalid workflow JSON in {anime_path}: {exc}",
+        ) from exc
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"Lumina workflow {anime_path} is missing node or field {exc!s} "
+                "(expected KSampler seed and user prompt nodes). Re-export anime.json from ComfyUI."
+            ),
+        ) from exc
+
+    try:
+        async with httpx.AsyncClient(
+            base_url=settings.comfyui_base_url.rstrip("/"),
+            timeout=httpx.Timeout(settings.workflow_timeout_sec, connect=60.0),
+        ) as client:
+            pid = await queue_prompt(client, anime_wf)
+            out = await wait_for_outputs(
+                client,
+                pid,
+                poll_interval=settings.poll_interval_sec,
+                timeout_sec=settings.workflow_timeout_sec,
             )
-        except KeyError:
-            return pick_first_by_extension(
-                out,
-                (".png", ".jpg", ".jpeg", ".webp"),
-            )
+    except httpx.RequestError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                f"Cannot reach ComfyUI at {settings.comfyui_base_url!r}: {exc}. "
+                "Start ComfyUI and check COMFYUI_BASE_URL in backend/.env."
+            ),
+        ) from exc
+
+    return pick_first_from_node(
+        out,
+        "9",
+        extensions=(".png", ".jpg", ".jpeg", ".webp"),
+    )
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="Lumina ComfyUI API")
+    app = FastAPI(title="Lumina ComfyUI API", lifespan=_lifespan)
+
+    @app.exception_handler(HTTPException)
+    async def _log_http_exceptions(request: Request, exc: HTTPException) -> JSONResponse:
+        log = logging.getLogger("uvicorn.error")
+        log.warning("%s %s -> %s %s", request.method, request.url.path, exc.status_code, exc.detail)
+        hdrs = dict(exc.headers) if getattr(exc, "headers", None) else None
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=jsonable_encoder({"detail": exc.detail}),
+            headers=hdrs,
+        )
 
     app.add_middleware(
         CORSMiddleware,
@@ -159,7 +231,10 @@ def create_app() -> FastAPI:
         except KeyError as exc:
             raise HTTPException(
                 status_code=502,
-                detail=f"Unexpected ComfyUI outputs: {exc}",
+                detail=(
+                    f"Lumina workflow must expose the final image on Save Image node id 9; ComfyUI outputs: {exc}. "
+                    "Re-export anime.json if your graph changed."
+                ),
             ) from exc
 
         image_url = build_view_url(
@@ -177,7 +252,11 @@ def create_app() -> FastAPI:
             False,
             description="Lower VRAM (~10 GB at 1280); slower. See upstream README.",
         ),
-    ) -> Response | FileResponse:
+        include_live2d: bool = Query(
+            False,
+            description="Bundle PSD + Stretchy Live2D (.cmo3 in zip). Worker needs STRETCHY_STUDIO_ROOT + Node.",
+        ),
+    ) -> Response:
         """
         See-through PSD decomposition via GPU worker HTTP API (recommended + SSH tunnel),
         or same-machine SEE_THROUGH_REPO subprocess fallback.
@@ -189,22 +268,29 @@ def create_app() -> FastAPI:
         raw_name = (file.filename or "image").strip()
 
         service_url = (settings.see_through_service_url or "").strip()
+        if include_live2d and not service_url and settings.stretchy_studio_root is None:
+            raise HTTPException(
+                status_code=503,
+                detail="include_live2d requires STRETCHY_STUDIO_ROOT when running See-through locally (no SEE_THROUGH_SERVICE_URL).",
+            )
+
         if service_url:
             try:
-                psd_bytes, fname = await proxy_decompose_to_remote(
+                body_out, fname_out, mt = await proxy_decompose_to_remote(
                     service_base_url=service_url,
                     secret=settings.see_through_service_secret,
                     file_body=body,
                     upload_filename=raw_name or "image.png",
                     group_offload=group_offload,
+                    include_live2d=include_live2d,
                     timeout_sec=settings.see_through_timeout_sec,
                 )
             except RuntimeError as exc:
                 raise HTTPException(status_code=502, detail=str(exc)) from exc
             return Response(
-                content=psd_bytes,
-                media_type="application/octet-stream",
-                headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+                content=body_out,
+                media_type=mt,
+                headers={"Content-Disposition": f'attachment; filename="{fname_out}"'},
             )
 
         if settings.see_through_repo is None:
@@ -230,10 +316,27 @@ def create_app() -> FastAPI:
             shutil.rmtree(d, ignore_errors=True)
 
         background_tasks.add_task(cleanup_job)
-        return FileResponse(
-            path=str(psd_path),
-            filename=dl_name,
-            media_type="application/octet-stream",
+
+        try:
+            body_out, fname_out, mt = await build_decompose_attachment_bytes(
+                stretchy_root=settings.stretchy_studio_root,
+                node_bin=settings.node_bin,
+                script_rel=settings.headless_export_script,
+                stretchy_timeout_sec=settings.stretchy_export_timeout_sec,
+                job_dir=job_dir,
+                psd_path=psd_path,
+                dl_name=dl_name,
+                include_live2d=include_live2d,
+            )
+        except TimeoutError as exc:
+            raise HTTPException(status_code=504, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+        return Response(
+            content=body_out,
+            media_type=mt,
+            headers={"Content-Disposition": f'attachment; filename="{fname_out}"'},
         )
 
     return app

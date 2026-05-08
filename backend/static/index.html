@@ -12,25 +12,171 @@
     #results { margin-top: 1.5rem; }
     #results img { max-width: 100%; border: 1px solid #ccc; }
     .hint { font-size: 0.85rem; color: #666; margin-bottom: 0.35rem; }
+    hr.sep { margin: 2rem 0; border: none; border-top: 1px solid #ddd; }
+    .row { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; margin-top: 0.5rem; }
+    #psd-result { margin-top: 1rem; padding: 0.75rem; background: #f6f6f6; border-radius: 6px; }
+    #psd-result a { font-weight: 600; }
   </style>
 </head>
 <body>
   <h1>Neta Lumina image</h1>
   <p class="hint">
-    ComfyUI must be running with the Lumina workflow (anime.json). Add tags + description (e.g. virtual youtuber, 1girl, outfit, best quality).
+    ComfyUI + <code>anime.json</code>. See-through PSD uses <code>SEE_THROUGH_SERVICE_URL</code> (SSH tunnel to the GPU worker; see <code>notes.txt</code>).
+    <a href="https://www.neta.art/blog/neta_lumina_prompt_book/">Prompt book</a>.
+    Black output: try without <code>--force-fp16</code> (see <code>notes.txt</code>).
   </p>
   <label for="prompt">User prompt</label>
-  <textarea id="prompt" placeholder="neta, 1girl, solo, virtual youtuber, ..."></textarea>
+  <textarea id="prompt" placeholder="neta, 1girl, solo, virtual youtuber, school uniform, blue eyes, twin tails, beautiful detailed eyes, gentle smile, medium shot, upper body, bust visible, front view, both shoulders visible, soft lighting, best quality"></textarea>
   <div>
     <button id="run" type="button">Generate</button>
   </div>
   <div id="status"></div>
   <div id="results"></div>
+
+  <hr class="sep" />
+  <h2>See-through PSD</h2>
+  <p class="hint">Decompose an image into layers (PSD). Use the last Lumina output, or pick a PNG/JPEG file. Browsers cannot preview PSD; download opens in Photoshop or GIMP.</p>
+  <div class="row">
+    <button id="psd-last" type="button" disabled>Decompose last generated image</button>
+    <label class="hint">Or file <input id="psd-file" type="file" accept="image/png,image/jpeg,image/webp" /></label>
+    <button id="psd-upload" type="button" disabled>Decompose chosen file</button>
+  </div>
+  <label class="hint"><input id="psd-offload" type="checkbox" /> Lower VRAM (<code>group_offload</code>, slower)</label>
+  <label class="hint"><input id="psd-live2d" type="checkbox" /> Include Stretchy Live2D (<code>include_live2d</code>; GPU worker needs Node + <code>STRETCHY_STUDIO_ROOT</code>)</label>
+  <div id="psd-status" style="margin-top: 0.75rem; white-space: pre-wrap; color: #444;"></div>
+  <div id="psd-result"></div>
+
   <script>
     const promptEl = document.getElementById('prompt');
     const statusEl = document.getElementById('status');
     const resultsEl = document.getElementById('results');
     const runBtn = document.getElementById('run');
+    const psdLastBtn = document.getElementById('psd-last');
+    const psdFileInput = document.getElementById('psd-file');
+    const psdUploadBtn = document.getElementById('psd-upload');
+    const psdOffloadEl = document.getElementById('psd-offload');
+    const psdLive2dEl = document.getElementById('psd-live2d');
+    const psdStatusEl = document.getElementById('psd-status');
+    const psdResultEl = document.getElementById('psd-result');
+    let lastImageUrl = null;
+
+    function parseFilenameFromCD(headerVal) {
+      if (!headerVal || !headerVal.includes('filename=')) return null;
+      const part = headerVal.split('filename=', 2)[1];
+      const unquoted = part.trim().replace(/^"(.+)"$/, '$1').split(';')[0].trim();
+      return unquoted || null;
+    }
+
+    async function postSeeThrough(fileBlob, uploadName) {
+      const params = new URLSearchParams();
+      if (psdOffloadEl.checked) params.set('group_offload', 'true');
+      if (psdLive2dEl.checked) params.set('include_live2d', 'true');
+      const q = params.toString() ? ('?' + params.toString()) : '';
+      const fd = new FormData();
+      fd.append('file', fileBlob, uploadName || 'image.png');
+      const res = await fetch('/api/see-through/decompose' + q, { method: 'POST', body: fd });
+      const blob = await res.blob();
+      if (!res.ok) {
+        let msg = await blob.text();
+        try {
+          const j = JSON.parse(msg);
+          msg = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail ?? j);
+        } catch { /* keep text */ }
+        throw new Error(msg.slice(0, 1500) || res.statusText);
+      }
+      const fname =
+        parseFilenameFromCD(res.headers.get('Content-Disposition')) || 'see_through.psd';
+      return { blob, fname };
+    }
+
+    function showPsdResult(blob, fname) {
+      psdResultEl.innerHTML = '';
+      const url = URL.createObjectURL(blob);
+      const wrap = document.createElement('div');
+      wrap.style.display = 'flex';
+      wrap.style.flexWrap = 'wrap';
+      wrap.style.alignItems = 'flex-start';
+      wrap.style.gap = '1rem';
+      const srcImg = document.querySelector('#results img');
+      if (srcImg && srcImg.src) {
+        const mini = document.createElement('img');
+        mini.src = srcImg.src;
+        mini.alt = 'Source image';
+        mini.style.maxWidth = '180px';
+        mini.style.border = '1px solid #ccc';
+        wrap.appendChild(mini);
+      }
+      const p = document.createElement('p');
+      p.style.margin = '0';
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fname;
+      a.textContent = fname;
+      const sizeKb = (blob.size / 1024).toFixed(1);
+      const isZip = fname.toLowerCase().endsWith('.zip');
+      p.appendChild(document.createTextNode(isZip ? 'Bundle (' + sizeKb + ' KB): ' : 'PSD ready (' + sizeKb + ' KB): '));
+      p.appendChild(a);
+      p.appendChild(document.createTextNode(isZip ? ' — contains PSD + live2d/*.cmo3.' : ' — open in Photoshop / GIMP / Photopea.'));
+      wrap.appendChild(p);
+      psdResultEl.appendChild(wrap);
+      const auto = document.createElement('a');
+      auto.href = url;
+      auto.download = fname;
+      auto.style.display = 'none';
+      document.body.appendChild(auto);
+      auto.click();
+      document.body.removeChild(auto);
+    }
+
+    psdFileInput.addEventListener('change', () => {
+      psdUploadBtn.disabled = !psdFileInput.files || !psdFileInput.files.length;
+    });
+
+    psdLastBtn.addEventListener('click', async () => {
+      if (!lastImageUrl) {
+        psdStatusEl.textContent = 'Generate an image first.';
+        return;
+      }
+      psdStatusEl.textContent = 'Fetching image and running See-through (long run on GPU)...';
+      psdResultEl.innerHTML = '';
+      psdLastBtn.disabled = true;
+      psdUploadBtn.disabled = true;
+      try {
+        const imgRes = await fetch(lastImageUrl);
+        if (!imgRes.ok) throw new Error('Could not load generated image: ' + imgRes.status);
+        const fileBlob = await imgRes.blob();
+        const { blob, fname } = await postSeeThrough(fileBlob, 'lumina_output.png');
+        psdStatusEl.textContent = 'Done.';
+        showPsdResult(blob, fname);
+      } catch (e) {
+        psdStatusEl.textContent = 'Error: ' + (e && e.message ? e.message : String(e));
+      } finally {
+        psdLastBtn.disabled = !lastImageUrl;
+        psdUploadBtn.disabled = !psdFileInput.files || !psdFileInput.files.length;
+      }
+    });
+
+    psdUploadBtn.addEventListener('click', async () => {
+      const f = psdFileInput.files && psdFileInput.files[0];
+      if (!f) {
+        psdStatusEl.textContent = 'Choose an image file.';
+        return;
+      }
+      psdStatusEl.textContent = 'Running See-through (long run on GPU)...';
+      psdResultEl.innerHTML = '';
+      psdLastBtn.disabled = true;
+      psdUploadBtn.disabled = true;
+      try {
+        const { blob, fname } = await postSeeThrough(f, f.name);
+        psdStatusEl.textContent = 'Done.';
+        showPsdResult(blob, fname);
+      } catch (e) {
+        psdStatusEl.textContent = 'Error: ' + (e && e.message ? e.message : String(e));
+      } finally {
+        psdLastBtn.disabled = !lastImageUrl;
+        psdUploadBtn.disabled = !psdFileInput.files || !psdFileInput.files.length;
+      }
+    });
 
     runBtn.addEventListener('click', async () => {
       const prompt = promptEl.value.trim();
@@ -60,6 +206,8 @@
         }
         statusEl.textContent = 'Done.';
         resultsEl.innerHTML = '';
+        lastImageUrl = data.image_url;
+        psdLastBtn.disabled = false;
         const img = document.createElement('img');
         img.src = data.image_url;
         img.alt = 'Lumina output';

@@ -1,23 +1,72 @@
+import os
 from functools import lru_cache
 from pathlib import Path
+from typing import Annotated, Any
 
-from pydantic import Field
+from pydantic import BeforeValidator, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_BACKEND_DIR = Path(__file__).resolve().parent.parent
 
 
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+    return _BACKEND_DIR.parent
+
+
+def _default_lumina_workflow() -> Path:
+    return _repo_root() / "anime.json"
+
+
+def _parse_lumina_workflow_path(v: Any) -> Path:
+    """Normalize paths from env (quotes, normpath). Relative paths are anchored to repo root."""
+    if v is None or v == "":
+        v = _default_lumina_workflow()
+    if isinstance(v, Path):
+        p = v
+    else:
+        s = str(v).strip().strip('"').strip("'")
+        p = Path(os.path.normpath(s))
+    if not p.is_absolute():
+        p = (_repo_root() / p).resolve()
+    else:
+        p = p.expanduser().resolve()
+    return p
+
+
+def _parse_optional_repo_path(v: Any) -> Path | None:
+    """Relative paths anchor to repo root; empty means None."""
+    if v is None or str(v).strip() == "":
+        return None
+    if isinstance(v, Path):
+        p = v
+    else:
+        s = str(v).strip().strip('"').strip("'")
+        p = Path(os.path.normpath(s))
+    if not p.is_absolute():
+        p = (_repo_root() / p).resolve()
+    else:
+        p = p.expanduser().resolve()
+    return p
+
+
+StretchyStudioRoot = Annotated[Path | None, BeforeValidator(_parse_optional_repo_path)]
+
+
+LuminaWorkflowPath = Annotated[Path, BeforeValidator(_parse_lumina_workflow_path)]
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=_BACKEND_DIR / ".env",
         env_file_encoding="utf-8",
         extra="ignore",
     )
 
     comfyui_base_url: str = Field(default="http://127.0.0.1:8188")
-    anime_workflow_path: Path | None = Field(default=None)
+    lumina_workflow_path: LuminaWorkflowPath = Field(
+        default_factory=_default_lumina_workflow,
+        description="Lumina workflow JSON. Env: LUMINA_WORKFLOW_PATH. Use forward slashes in .env on Windows.",
+    )
     poll_interval_sec: float = Field(default=1.0)
     workflow_timeout_sec: float = Field(default=7200.0)
 
@@ -46,8 +95,22 @@ class Settings(BaseSettings):
     )
     see_through_timeout_sec: float = Field(default=7200.0)
 
-    def anime_path(self) -> Path:
-        return self.anime_workflow_path or (_repo_root() / "anime.json")
+    stretchy_studio_root: StretchyStudioRoot = Field(
+        default=None,
+        description=(
+            "Path to stretchystudio repo (npm install + canvas). "
+            "GPU worker: required for include_live2d=1 on /api/see-through/decompose."
+        ),
+    )
+    node_bin: str = Field(default="node", description="Node executable for headless Live2D export.")
+    headless_export_script: str = Field(
+        default="scripts/headless_live2d_export.mjs",
+        description="Relative to stretchy_studio_root.",
+    )
+    stretchy_export_timeout_sec: float = Field(
+        default=7200.0,
+        description="Timeout for node headless Live2D subprocess.",
+    )
 
 
 @lru_cache

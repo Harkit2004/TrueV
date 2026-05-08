@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import shutil
 from pathlib import Path
 
 
@@ -12,6 +13,25 @@ def expected_psd_path(save_dir: Path, image_stem: str) -> Path:
     return save_dir / f"{image_stem}.psd"
 
 
+def resolve_python_executable(python_exe: str) -> str:
+    """
+    SEE_THROUGH_PYTHON must exist on the worker host. Bare names are resolved via PATH.
+    Misconfiguration otherwise yields subprocess errno 2 with an opaque message.
+    """
+    raw = (python_exe or "").strip() or "python"
+    p = Path(raw).expanduser()
+    if p.is_file():
+        return str(p.resolve())
+    found = shutil.which(raw)
+    if found:
+        return found
+    raise FileNotFoundError(
+        f"See-through Python interpreter not found: {python_exe!r}. "
+        "On the GPU worker set SEE_THROUGH_PYTHON to the conda env python "
+        "(e.g. $HOME/miniconda3/envs/see_through/bin/python)."
+    )
+
+
 async def run_inference_psd(
     *,
     repo: Path,
@@ -21,12 +41,21 @@ async def run_inference_psd(
     timeout_sec: float,
     group_offload: bool,
 ) -> None:
-    script = inference_script_path(repo)
+    repo_root = repo.expanduser().resolve()
+    if not repo_root.is_dir():
+        raise FileNotFoundError(
+            f"SEE_THROUGH_REPO is not a directory: {repo_root}. "
+            "On the worker, point it at the cloned https://github.com/shitagaki-lab/see-through tree."
+        )
+
+    script = inference_script_path(repo_root)
     if not script.is_file():
         raise FileNotFoundError(f"Missing See-through script: {script}")
 
+    resolved_py = resolve_python_executable(python_exe)
+
     cmd: list[str] = [
-        python_exe,
+        resolved_py,
         str(script),
         "--srcp",
         str(src_image),
@@ -40,7 +69,7 @@ async def run_inference_psd(
 
     proc = await asyncio.create_subprocess_exec(
         *cmd,
-        cwd=str(repo),
+        cwd=str(repo_root),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )

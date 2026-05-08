@@ -10,9 +10,10 @@ async def proxy_decompose_to_remote(
     file_body: bytes,
     upload_filename: str,
     group_offload: bool,
+    include_live2d: bool,
     timeout_sec: float,
-) -> tuple[bytes, str]:
-    """POST multipart to the GPU worker; returns (psd_bytes, filename_for_client)."""
+) -> tuple[bytes, str, str]:
+    """POST multipart to the GPU worker; returns (body_bytes, filename_for_client, media_type)."""
     headers: dict[str, str] = {}
     if secret:
         headers["X-See-Through-Secret"] = secret
@@ -29,7 +30,10 @@ async def proxy_decompose_to_remote(
         try:
             r = await client.post(
                 "/decompose",
-                params={"group_offload": str(group_offload).lower()},
+                params={
+                    "group_offload": str(group_offload).lower(),
+                    "include_live2d": str(include_live2d).lower(),
+                },
                 files=files,
                 headers=headers,
             )
@@ -47,4 +51,5 @@ async def proxy_decompose_to_remote(
         if part:
             fname = part
 
-    return r.content, fname
+    mt = (r.headers.get("content-type") or "").split(";")[0].strip() or "application/octet-stream"
+    return r.content, fname, mt

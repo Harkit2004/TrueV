@@ -126,17 +126,6 @@ def pick_first_from_node(
     raise KeyError(f"No matching output on node {node_id}")
 
 
-def pick_first_by_extension(
-    outputs: dict[str, Any],
-    extensions: tuple[str, ...],
-) -> dict[str, Any]:
-    for _, item in collect_output_entries(outputs):
-        name = str(item.get("filename", "")).lower()
-        if any(name.endswith(ext) for ext in extensions):
-            return item
-    raise KeyError(f"No output with extensions {extensions}")
-
-
 async def fetch_view_bytes(
     client: httpx.AsyncClient,
     *,

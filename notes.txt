@@ -4,7 +4,6 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1   # Windows
 pip install -r requirements.txt
 python run.py
-Open http://127.0.0.1:8000
 
 Run the comfui on gpu droplet:
 ssh root@<droplet-ip>
@@ -15,72 +14,49 @@ source ./venv/bin/activate
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm7.2
 pip install -r requirements.txt
 python3 main.py
-cd ~; ssh -L 8188:localhost:8188 root@<droplet-ip> # in another terminal
 
 Set up the see through on droplet:
+ssh root@<droplet-ip>
 wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
 bash Miniconda3-latest-Linux-x86_64.sh
 source ~/.bashrc
+export PATH="$HOME/miniconda3/bin:$PATH"
+conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main
+conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
 git clone https://github.com/shitagaki-lab/see-through
 cd see-through
 conda create -n see_through python=3.12 -y
+source ~/miniconda3/etc/profile.d/conda.sh
 conda activate see_through
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm7.2
 pip install -r requirements.txt
 ln -sf common/assets assets
 cd ~
-git clone 
+conda deactivate
+git clone https://github.com/Harkit2004/TrueV.git
+cd TrueV/backend
+python3 -m venv .venv
+source ./.venv/bin/activate
+pip install -r requirements.txt
+touch .env
+nano .env # paste in the required variables
+  SEE_THROUGH_REPO=~/see-through
+  SEE_THROUGH_PYTHON=~/miniconda3/envs/see_through/bin/python
+python run_see_through_worker.py
 
+Start ssh tunnels:
+ssh -N -L 8188:127.0.0.1:8188 -L 9105:127.0.0.1:9105 root@<droplet-ip>
 
+Stretchy Studio headless (GPU worker .env): clone/copy `stretchystudio` next to this repo, then `cd stretchystudio && npm install` (requires Node 20+; `canvas` native module needs build tools on Linux). Set `STRETCHY_STUDIO_ROOT` to that folder path. Full bundle: `POST /api/see-through/decompose?include_live2d=true` returns a zip containing the PSD and `live2d/<name>.cmo3`.
 
-On the droplet:
+This repo backend on your laptop (backend/.env) should point at the tunnels, e.g.:
+COMFYUI_BASE_URL=http://127.0.0.1:8188
+SEE_THROUGH_SERVICE_URL=http://127.0.0.1:9105
 
-  A) Clone https://github.com/shitagaki-lab/see-through and follow its README (conda env, PyTorch CUDA wheel, pip install -r requirements.txt, ln -sf common/assets assets from repo root).
+See-through HTTP 500 "[Errno 2]" on decompose: on the droplet, SEE_THROUGH_PYTHON must be the real conda python path (ls that file); SEE_THROUGH_REPO must exist and contain inference/scripts/inference_psd.py. Optional: cd see-through && ln -sf common/assets assets
 
-  B) Clone this hackathon repo if needed; cd backend; use .venv and pip install -r requirements.txt.
+If the worker prints nothing for a long time, wait for import/warnings; then you should see Uvicorn lines.
+If you see "address already in use" / WinError 10048, port 9105 is taken - set SEE_THROUGH_WORKER_PORT=9106 on the worker and use the same port in SSH -L and in laptop SEE_THROUGH_SERVICE_URL.
 
-  C) In backend/.env on the droplet set:
-
-       SEE_THROUGH_REPO=/path/to/see-through
-
-       SEE_THROUGH_PYTHON=/path/to/that/conda/env/bin/python
-
-     Optional shared auth (recommended if the worker port is ever exposed beyond localhost):
-
-       SEE_THROUGH_SERVICE_SECRET=your-long-random-string
-
-  D) Start the worker (listens on loopback only by default):
-
-       python run_see_through_worker.py
-
-     Defaults: SEE_THROUGH_WORKER_HOST=127.0.0.1, SEE_THROUGH_WORKER_PORT=9105.
-
-     Optional: HF_TOKEN on the droplet for faster Hugging Face downloads when See-through pulls models.
-
-
-
-On your laptop (main FastAPI):
-
-  E) Open SSH local forwards alongside your Comfy tunnel, for example:
-
-       ssh -N -L 8188:127.0.0.1:8188 -L 9105:127.0.0.1:9105 USER@DROPLET_IP
-
-     Adjust ports if your droplet uses different Comfy or worker ports.
-
-  F) In backend/.env on the laptop set:
-
-       COMFYUI_BASE_URL=http://127.0.0.1:8188
-
-       SEE_THROUGH_SERVICE_URL=http://127.0.0.1:9105
-
-       SEE_THROUGH_SERVICE_SECRET=same-as-droplet-if-you-set-it
-
-     You do not need SEE_THROUGH_REPO on the laptop when SEE_THROUGH_SERVICE_URL is set.
-
-  G) python run.py on the laptop; POST /api/see-through/decompose uploads the image here and the backend forwards it to the droplet worker over the tunnel.
-
-
-
-Alternative without this worker: Hugging Face demo — https://huggingface.co/spaces/24yearsold/see-through-demo
-
-
+Neta Lumina prompt book: https://www.neta.art/blog/neta_lumina_prompt_book/
+Black images on Lumina: avoid ComfyUI --force-fp16 / --fp16-unet when possible.
