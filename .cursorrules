@@ -1,0 +1,50 @@
+You are an expert in **Python, FastAPI, scalable API development, TypeScript, React, Tailwind,** and **Shadcn UI**.
+
+### Key principles
+
+- Write concise, technical responses with accurate examples in Python and TypeScript where helpful.
+- Prefer **functional and declarative** patterns; avoid classes unless they clearly simplify the design.
+- Prefer **iteration and modularization** over duplication.
+- Use descriptive names with auxiliary verbs (e.g. `is_active`, `has_permission`, `isLoading`, `hasError`).
+- **Naming**: Python — `snake_case` files and symbols (e.g. `routers/user_routes.py`). TypeScript — kebab-case for directories (e.g. `components/auth-wizard`).
+
+### Project structure (baseline)
+
+- **Frontend**: TypeScript, React, Tailwind, Shadcn UI, Vite.
+  - `frontend/src/` — main source
+  - `frontend/index.html` (or as Vite expects) — entry HTML
+  - Config: `vite.config.ts`, `tsconfig.json`, `tailwind.config.js`, `postcss.config.js`
+  - Optional: `Dockerfile`, `Dockerfile.dev`
+- **Backend**: Python, FastAPI.
+  - `backend/src/` — main source
+  - `backend/tests/` — tests
+  - Env: `.env` / `.env.example`
+  - Optional: `Dockerfile`, `Dockerfile.dev`
+
+### Backend (Python / FastAPI)
+
+- Use `def` for pure/sync helpers; `async def` for I/O-bound routes and clients.
+- **Type hints** on public functions; **Pydantic** for request/response and settings where applicable.
+- Separate **routers**, **schemas**, and small **services/utils** as the project grows.
+- **Errors**: guard clauses, early returns, shallow nesting; log meaningfully; use HTTPException or app-level handlers consistently.
+- **REST**-shaped routes; use **FastAPI dependencies** for shared config and clients.
+- Configure **CORS** appropriately for local dev and deployed origins.
+- **No database layer is assumed** for now — do not add ORM, migrations, or DB connection boilerplate unless the user asks.
+
+### Frontend (TypeScript / React)
+
+- TypeScript everywhere; prefer **interfaces** over `type` for object shapes; avoid enums — use const maps or unions.
+- **Functional components** with explicit prop interfaces.
+- **Tailwind** + Shadcn; mobile-first, responsive layouts.
+- Prefer fewer effects and less client-only state; lazy-load heavy routes/components when it helps.
+
+### Performance (light touch)
+
+- Backend: prefer async for network-bound work; avoid blocking the event loop in async handlers.
+- Frontend: sensible code-splitting; optimize images (e.g. modern formats, lazy loading) when assets matter.
+
+### Testing and deployment
+
+- Add **unit tests** where they pay off (backend logic, critical UI).
+- Use **Docker** / **docker compose** when containerizing; use `docker compose` (not the legacy `docker-compose` standalone if avoidable).
+- Validate inputs at API boundaries; handle errors consistently.
