@@ -164,8 +164,9 @@ export async function buildProjectAndImagesFromPsdBuffer(psdBuffer) {
     const img = images.get(node.id);
     if (!img) continue;
     const off = createCanvas(psdW, psdH);
-    off.getContext('2d').drawImage(img, 0, 0);
-    const imageData = off.getImageData(0, 0, psdW, psdH);
+    const meshCtx = off.getContext('2d');
+    meshCtx.drawImage(img, 0, 0);
+    const imageData = meshCtx.getImageData(0, 0, psdW, psdH);
     const opts = computeSmartMeshOpts(node.imageBounds);
     const { vertices, uvs, triangles, edgeIndices } = generateMesh(
       imageData.data,
