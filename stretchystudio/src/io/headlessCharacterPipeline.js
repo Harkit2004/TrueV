@@ -97,6 +97,8 @@ export async function buildProjectAndImagesFromPsdBuffer(psdBuffer) {
     physics_groups: [],
     physicsRules: [],
     animations: [],
+    // Runtime ZIP (`exportLive2D`): { id, name?, parameters: [{ id, value, blend? }], fadeInTime?, fadeOutTime? }
+    expressions: [],
   };
 
   const images = new Map();

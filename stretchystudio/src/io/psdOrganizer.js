@@ -55,6 +55,44 @@ const GROUP_PARENT = {
 // Creation order — parents before children
 const GROUP_CREATE_ORDER = ['body', 'upperbody', 'lowerbody', 'head', 'extras', 'eyes'];
 
+/** Lower value = drawn further back; higher = more in front (Cubism drawOrder). */
+const TAG_DRAW_PRIORITY = {
+  objects: 5,
+  'back hair': 12,
+  wings: 14,
+  tail: 14,
+  bottomwear: 22,
+  legwear: 24,
+  footwear: 26,
+  topwear: 36,
+  neck: 44,
+  neckwear: 45,
+  handwear: 46,
+  face: 54,
+  ears: 55,
+  earwear: 56,
+  nose: 57,
+  eyebrow: 58,
+  'eyebrow-l': 58,
+  'eyebrow-r': 58,
+  eyewear: 59,
+  eyewhite: 64,
+  'eyewhite-l': 64,
+  'eyewhite-r': 64,
+  irides: 66,
+  'irides-l': 66,
+  'irides-r': 66,
+  eyes: 66,
+  eyel: 66,
+  eyer: 66,
+  mouth: 67,
+  eyelash: 69,
+  'eyelash-l': 69,
+  'eyelash-r': 69,
+  'front hair': 84,
+  headwear: 90,
+};
+
 /** Returns the matched tag for a layer name, or null. */
 export function matchTag(name) {
   const lower = name.toLowerCase().trim();
@@ -107,17 +145,34 @@ export function organizeCharacterLayers(layers, uidFn) {
     groupDefs.push({ id, name: gName, parentId: GROUP_PARENT[gName] ? groupIds[GROUP_PARENT[gName]] : null });
   }
 
-  // Build assignments map: original layer index → { parentGroupId, drawOrder }
+  // Build assignments: semantic draw stack for tagged layers (neck vs collar, etc.),
+  // stable within same tag by original PSD depth (numLayers - 1 - i).
   const assignments = new Map();
   const numLayers = layers.length;
-  tagged.forEach((item) => {
+  const items = tagged.map((item) => {
     const groups = item.tag ? TAG_TO_GROUPS[item.tag] : null;
     const innermost = groups ? groups[groups.length - 1] : null;
-    assignments.set(item.i, {
+    const baseOrder = numLayers - 1 - item.i;
+    const pri = item.tag != null ? (TAG_DRAW_PRIORITY[item.tag] ?? 50) : 50;
+    return {
+      i: item.i,
+      tag: item.tag,
       parentGroupId: innermost ? (groupIds[innermost] ?? null) : null,
-      drawOrder: numLayers - 1 - item.i,
-    });
+      baseOrder,
+      pri,
+    };
   });
+  items.sort((a, b) => {
+    if (a.pri !== b.pri) return a.pri - b.pri;
+    return a.baseOrder - b.baseOrder;
+  });
+  for (let rank = 0; rank < items.length; rank++) {
+    const row = items[rank];
+    assignments.set(row.i, {
+      parentGroupId: row.parentGroupId,
+      drawOrder: rank,
+    });
+  }
 
   return { groupDefs, assignments };
 }

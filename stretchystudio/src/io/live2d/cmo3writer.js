@@ -129,6 +129,7 @@ export async function generateCmo3(input) {
     neckWarp: null,
     faceParallax: null,
     eyeClosureContexts: [],
+    clipMaskResolution: [],
     params: {},
     warnings: [],
   } : null;
@@ -216,6 +217,10 @@ export async function generateCmo3(input) {
   }
 
   // Standard Live2D parameters (when generateRig is enabled).
+  // Semantics (used by auto-rig warps + motion3 idle preset):
+  //   ParamEyeLOpen / ParamEyeROpen — 1 = eye open, 0 = fully closed (blink).
+  //   ParamMouthOpenY — 0 = mouth closed (rest), 1 = maximally open (jaw warp).
+  //   ParamEyeBallX / ParamEyeBallY — gaze; irises shift in warp-local space (clipped by eyewhite).
   // These use SDK-standard IDs so face tracking apps (VTube Studio) recognize them.
   if (generateRig) {
     const standardParams = [
@@ -2074,6 +2079,48 @@ export async function generateCmo3(input) {
   const pidParamAngleY     = paramDefs.find(p => p.id === 'ParamAngleY')?.pid;
   const pidParamAngleZ     = paramDefs.find(p => p.id === 'ParamAngleZ')?.pid;
 
+  // Iris gaze amplitude scales down when the fitted eye-region union is small
+  // (anime-style tight eyes) so sclera clip + texture stay aligned at ParamEyeBall extremes.
+  const irisGazeScaleFromUnionBox = (u) => {
+    if (!u) return 1;
+    const uw = u.maxX - u.minX;
+    const uh = u.maxY - u.minY;
+    const ref = Math.min(uw, uh);
+    if (ref < 18) return Math.max(0.48, ref / 38);
+    if (ref < 42) return Math.max(0.62, 0.5 + ref * 0.003);
+    return Math.min(1, 0.82 + ref * 0.0004);
+  };
+  const irisGazeFracsForMeshTag = (meshTag) => {
+    const baseX = 0.09;
+    const baseY = 0.075;
+    if (meshTag === 'irides-l' || meshTag === 'eyel') {
+      const s = irisGazeScaleFromUnionBox(eyeUnionBboxPerSide.get('l'));
+      return { ax: baseX * s, ay: baseY * s };
+    }
+    if (meshTag === 'irides-r' || meshTag === 'eyer') {
+      const s = irisGazeScaleFromUnionBox(eyeUnionBboxPerSide.get('r'));
+      return { ax: baseX * s, ay: baseY * s };
+    }
+    if (meshTag === 'irides' || meshTag === 'eyes') {
+      const sl = irisGazeScaleFromUnionBox(eyeUnionBboxPerSide.get('l'));
+      const sr = irisGazeScaleFromUnionBox(eyeUnionBboxPerSide.get('r'));
+      const s = Math.min(sl, sr);
+      return { ax: baseX * s, ay: baseY * s };
+    }
+    return { ax: baseX, ay: baseY };
+  };
+  const irisGazeShiftGrid = (grid, kX, kY, gxS, gyS, meshTag) => {
+    const { ax, ay } = irisGazeFracsForMeshTag(meshTag);
+    const pos = new Float64Array(grid);
+    const dx = kX * gxS * ax;
+    const dy = -kY * gyS * ay;
+    for (let i = 0; i < pos.length; i += 2) {
+      pos[i] += dx;
+      pos[i + 1] += dy;
+    }
+    return pos;
+  };
+
   // ── Per-part warp parameter bindings (Session 16) ──
   // Each entry: bindings (param specs) + shiftFn (procedural grid generation).
   // shiftFn(restGrid, gW, gH, keyVals[], gxSpan, gySpan) → shifted Float64Array.
@@ -2254,16 +2301,8 @@ export async function generateCmo3(input) {
         { pid: pidParamEyeBallX, keys: [-1, 0, 1], desc: 'ParamEyeBallX' },
         { pid: pidParamEyeBallY, keys: [-1, 0, 1], desc: 'ParamEyeBallY' },
       ],
-      shiftFn: (grid, gW, gH, [kX, kY], gxS, gyS) => {
-        const pos = new Float64Array(grid);
-        const dx = kX * gxS * 0.09;
-        const dy = -kY * gyS * 0.075;
-        for (let i = 0; i < pos.length; i += 2) {
-          pos[i]     += dx;
-          pos[i + 1] += dy;
-        }
-        return pos;
-      },
+      shiftFn: (grid, gW, gH, [kX, kY], gxS, gyS) =>
+        irisGazeShiftGrid(grid, kX, kY, gxS, gyS, 'irides'),
     }],
     // ── Iris gaze (Session 18): ParamEyeBallX × ParamEyeBallY uniform translation ──
     // Closure lives at mesh level (CArtMeshForm, Session 17). Gaze lives here on the
@@ -2275,32 +2314,16 @@ export async function generateCmo3(input) {
         { pid: pidParamEyeBallX, keys: [-1, 0, 1], desc: 'ParamEyeBallX' },
         { pid: pidParamEyeBallY, keys: [-1, 0, 1], desc: 'ParamEyeBallY' },
       ],
-      shiftFn: (grid, gW, gH, [kX, kY], gxS, gyS) => {
-        const pos = new Float64Array(grid);
-        const dx = kX * gxS * 0.09;
-        const dy = -kY * gyS * 0.075;
-        for (let i = 0; i < pos.length; i += 2) {
-          pos[i]     += dx;
-          pos[i + 1] += dy;
-        }
-        return pos;
-      },
+      shiftFn: (grid, gW, gH, [kX, kY], gxS, gyS) =>
+        irisGazeShiftGrid(grid, kX, kY, gxS, gyS, 'irides-l'),
     }],
     ['irides-r', {
       bindings: [
         { pid: pidParamEyeBallX, keys: [-1, 0, 1], desc: 'ParamEyeBallX' },
         { pid: pidParamEyeBallY, keys: [-1, 0, 1], desc: 'ParamEyeBallY' },
       ],
-      shiftFn: (grid, gW, gH, [kX, kY], gxS, gyS) => {
-        const pos = new Float64Array(grid);
-        const dx = kX * gxS * 0.09;
-        const dy = -kY * gyS * 0.075;
-        for (let i = 0; i < pos.length; i += 2) {
-          pos[i]     += dx;
-          pos[i + 1] += dy;
-        }
-        return pos;
-      },
+      shiftFn: (grid, gW, gH, [kX, kY], gxS, gyS) =>
+        irisGazeShiftGrid(grid, kX, kY, gxS, gyS, 'irides-r'),
     }],
     // V1/V2 collapsed eye layers — 2-param gaze warp only (Cubism FREE per-object limit).
     ['eyes', {
@@ -2308,48 +2331,24 @@ export async function generateCmo3(input) {
         { pid: pidParamEyeBallX, keys: [-1, 0, 1], desc: 'ParamEyeBallX' },
         { pid: pidParamEyeBallY, keys: [-1, 0, 1], desc: 'ParamEyeBallY' },
       ],
-      shiftFn: (grid, gW, gH, [kX, kY], gxS, gyS) => {
-        const pos = new Float64Array(grid);
-        const dx = kX * gxS * 0.09;
-        const dy = -kY * gyS * 0.075;
-        for (let i = 0; i < pos.length; i += 2) {
-          pos[i]     += dx;
-          pos[i + 1] += dy;
-        }
-        return pos;
-      },
+      shiftFn: (grid, gW, gH, [kX, kY], gxS, gyS) =>
+        irisGazeShiftGrid(grid, kX, kY, gxS, gyS, 'eyes'),
     }],
     ['eyel', {
       bindings: [
         { pid: pidParamEyeBallX, keys: [-1, 0, 1], desc: 'ParamEyeBallX' },
         { pid: pidParamEyeBallY, keys: [-1, 0, 1], desc: 'ParamEyeBallY' },
       ],
-      shiftFn: (grid, gW, gH, [kX, kY], gxS, gyS) => {
-        const pos = new Float64Array(grid);
-        const dx = kX * gxS * 0.09;
-        const dy = -kY * gyS * 0.075;
-        for (let i = 0; i < pos.length; i += 2) {
-          pos[i]     += dx;
-          pos[i + 1] += dy;
-        }
-        return pos;
-      },
+      shiftFn: (grid, gW, gH, [kX, kY], gxS, gyS) =>
+        irisGazeShiftGrid(grid, kX, kY, gxS, gyS, 'eyel'),
     }],
     ['eyer', {
       bindings: [
         { pid: pidParamEyeBallX, keys: [-1, 0, 1], desc: 'ParamEyeBallX' },
         { pid: pidParamEyeBallY, keys: [-1, 0, 1], desc: 'ParamEyeBallY' },
       ],
-      shiftFn: (grid, gW, gH, [kX, kY], gxS, gyS) => {
-        const pos = new Float64Array(grid);
-        const dx = kX * gxS * 0.09;
-        const dy = -kY * gyS * 0.075;
-        for (let i = 0; i < pos.length; i += 2) {
-          pos[i]     += dx;
-          pos[i + 1] += dy;
-        }
-        return pos;
-      },
+      shiftFn: (grid, gW, gH, [kX, kY], gxS, gyS) =>
+        irisGazeShiftGrid(grid, kX, kY, gxS, gyS, 'eyer'),
     }],
     // Session 28: CLIP masks — identity rig warp on ParamEyeBallX × ParamEyeBallY only
     // (2 params) so clipped irides stay aligned at gaze extremes without exceeding
@@ -3630,6 +3629,22 @@ export async function generateCmo3(input) {
     'eyer':      'eyewhite-r',
   };
 
+  const resolveClipMaskPid = (meshTag, drawableByTag) => {
+    const want = CLIP_RULES[meshTag];
+    if (!want) return { pid: null, resolvedTag: null, wanted: null, usedFallback: false };
+    /** @type {string[]} */
+    const chain = [];
+    if (want === 'eyewhite') chain.push('eyewhite', 'eyewhite-l', 'eyewhite-r');
+    else if (want === 'eyewhite-l') chain.push('eyewhite-l', 'eyewhite');
+    else if (want === 'eyewhite-r') chain.push('eyewhite-r', 'eyewhite');
+    else chain.push(want);
+    for (const t of chain) {
+      const pid = drawableByTag.get(t);
+      if (pid) return { pid, resolvedTag: t, wanted: want, usedFallback: t !== want };
+    }
+    return { pid: null, resolvedTag: null, wanted: want, usedFallback: false };
+  };
+
   for (const pm of perMesh) {
     const [meshSrc, pidMesh] = x.shared('CArtMeshSource');
     meshSrcIds.push(pidMesh);
@@ -3794,13 +3809,29 @@ export async function generateCmo3(input) {
       meshDfGuid = pidDeformerRoot;
     }
     x.subRef(ds, 'CDeformerGuid', meshDfGuid, { 'xs.n': 'targetDeformerGuid' });
-    // Clipping-mask: iris masked by eyewhite, etc. See CLIP_RULES above.
     const meshTag = meshes[pm.mi].tag;
-    const maskTag = meshTag ? CLIP_RULES[meshTag] : null;
-    const maskPid = maskTag ? tagToPidDrawable.get(maskTag) : null;
-    if (maskPid) {
+    const clipRes = resolveClipMaskPid(meshTag, tagToPidDrawable);
+    if (rigDebugLog && meshTag && CLIP_RULES[meshTag]) {
+      rigDebugLog.clipMaskResolution.push({
+        drawableTag: meshTag,
+        wantedMask: clipRes.wanted,
+        resolvedMaskTag: clipRes.resolvedTag,
+        usedFallback: clipRes.usedFallback,
+        ok: !!clipRes.pid,
+      });
+      if (!clipRes.pid) {
+        rigDebugLog.warnings.push(
+          `Clip mask unresolved for drawable tag "${meshTag}" (expected mask chain from "${clipRes.wanted}")`,
+        );
+      } else if (clipRes.usedFallback) {
+        rigDebugLog.warnings.push(
+          `Clip mask for "${meshTag}" uses fallback mask tag "${clipRes.resolvedTag}" (primary "${clipRes.wanted}" missing)`,
+        );
+      }
+    }
+    if (clipRes.pid) {
       const clipList = x.sub(ds, 'carray_list', { 'xs.n': 'clipGuidList', count: '1' });
-      x.subRef(clipList, 'CDrawableGuid', maskPid);
+      x.subRef(clipList, 'CDrawableGuid', clipRes.pid);
     } else {
       x.sub(ds, 'carray_list', { 'xs.n': 'clipGuidList', count: '0' });
     }

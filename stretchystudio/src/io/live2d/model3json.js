@@ -20,6 +20,7 @@
  * @property {string}   [displayInfoFile] - Relative path to .cdi3.json
  * @property {Object}   [groups]        - { LipSync: [...paramIds], EyeBlink: [...paramIds] }
  * @property {Object[]} [hitAreas]      - [{ Id, Name }]
+ * @property {{Name:string,File:string}[]} [expressions] - exp3.json paths relative to model root
  */
 
 /**
@@ -38,6 +39,7 @@ export function generateModel3Json(opts) {
     displayInfoFile = null,
     groups = {},
     hitAreas = [],
+    expressions = [],
   } = opts;
 
   const model = {
@@ -57,6 +59,13 @@ export function generateModel3Json(opts) {
   }
   if (displayInfoFile) {
     model.FileReferences.DisplayInfo = displayInfoFile;
+  }
+
+  if (expressions.length > 0) {
+    model.FileReferences.Expressions = expressions.map((e) => ({
+      Name: e.Name,
+      File: e.File,
+    }));
   }
 
   // Motion groups — group by name prefix or put all under "Idle"

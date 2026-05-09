@@ -109,6 +109,59 @@ export function generateMotion3Json(animation, opts = {}) {
 }
 
 /**
+ * Preset idle motion: periodic blink on both eyes, mouth closed (ParamMouthOpenY = 0).
+ * Uses SDK-standard parameter ids from auto-rig (`generateCmo3` with generateRig):
+ *   ParamEyeLOpen / ParamEyeROpen — 1 = fully open, 0 = closed
+ *   ParamMouthOpenY — 0 = closed, 1 = open
+ *
+ * @param {{ durationMs?: number, fps?: number }} [opts]
+ * @returns {object} motion3.json root object
+ */
+export function generateIdleFaceMotion3Json(opts = {}) {
+  const durationMs = opts.durationMs ?? 4000;
+  const fps = opts.fps ?? 30;
+  const durationSec = durationMs / 1000;
+  const eyeKfs = [
+    { time: 0, value: 1, easing: 'linear' },
+    { time: 2600, value: 1, easing: 'linear' },
+    { time: 2800, value: 0.08, easing: 'linear' },
+    { time: 3000, value: 1, easing: 'linear' },
+    { time: durationMs, value: 1, easing: 'linear' },
+  ];
+  const mouthKfs = [
+    { time: 0, value: 0, easing: 'linear' },
+    { time: durationMs, value: 0, easing: 'linear' },
+  ];
+  const curves = [
+    { Target: 'Parameter', Id: 'ParamEyeLOpen', Segments: encodeKeyframesToSegments(eyeKfs, durationSec) },
+    { Target: 'Parameter', Id: 'ParamEyeROpen', Segments: encodeKeyframesToSegments(eyeKfs, durationSec) },
+    { Target: 'Parameter', Id: 'ParamMouthOpenY', Segments: encodeKeyframesToSegments(mouthKfs, durationSec) },
+  ];
+  let totalSegmentCount = 0;
+  let totalPointCount = 0;
+  for (const c of curves) {
+    const segInfo = countSegmentsAndPoints(c.Segments);
+    totalSegmentCount += segInfo.segments;
+    totalPointCount += segInfo.points;
+  }
+  return {
+    Version: 3,
+    Meta: {
+      Duration: durationSec,
+      Fps: fps,
+      Loop: true,
+      AreBeziersRestricted: false,
+      CurveCount: curves.length,
+      TotalSegmentCount: totalSegmentCount,
+      TotalPointCount: totalPointCount,
+      UserDataCount: 0,
+      TotalUserDataSize: 0,
+    },
+    Curves: curves,
+  };
+}
+
+/**
  * Map a Stretchy Studio track to a Live2D curve target + ID.
  *
  * @param {object} track - { nodeId, property, keyframes }

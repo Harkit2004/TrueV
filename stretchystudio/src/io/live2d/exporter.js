@@ -9,7 +9,8 @@
 
 import { generateModel3Json } from './model3json.js';
 import { generateCdi3Json } from './cdi3json.js';
-import { generateMotion3Json } from './motion3json.js';
+import { generateMotion3Json, generateIdleFaceMotion3Json } from './motion3json.js';
+import { generateExp3Json } from './exp3json.js';
 import { generateMoc3 } from './moc3writer.js';
 import { packTextureAtlas } from './textureAtlas.js';
 import { generateCmo3 } from './cmo3writer.js';
@@ -21,6 +22,7 @@ import { matchTag } from '../armatureOrganizer.js';
  * @property {string}  modelName   - Base name (e.g. "character")
  * @property {number}  [atlasSize=2048] - Texture atlas size
  * @property {boolean} [exportMotions=true] - Whether to include .motion3.json files
+ * @property {boolean} [includeIdleFaceMotion=false] - When true and there are no project.animations, emit motion/idle_face.motion3.json (blink + closed mouth).
  * @property {function} [onProgress] - Progress callback (message: string)
  */
 
@@ -37,6 +39,7 @@ export async function exportLive2D(project, images, opts = {}) {
     modelName = 'model',
     atlasSize = 2048,
     exportMotions = true,
+    includeIdleFaceMotion = false,
     onProgress = () => {},
   } = opts;
 
@@ -97,9 +100,10 @@ export async function exportLive2D(project, images, opts = {}) {
   }
 
   const motionFiles = [];
+  let motionFolder = null;
   if (exportMotions && project.animations?.length > 0) {
     onProgress('Generating motion files...');
-    const motionFolder = zip.folder('motion');
+    motionFolder = zip.folder('motion');
 
     for (const anim of project.animations) {
       const sanitized = sanitizeName(anim.name);
@@ -107,6 +111,38 @@ export async function exportLive2D(project, images, opts = {}) {
       const motion = generateMotion3Json(anim, { parameterMap });
       motionFolder.file(filename, JSON.stringify(motion, null, '\t'));
       motionFiles.push(`motion/${filename}`);
+    }
+  }
+  if (exportMotions && includeIdleFaceMotion && (!project.animations || project.animations.length === 0)) {
+    onProgress('Generating idle face motion...');
+    if (!motionFolder) motionFolder = zip.folder('motion');
+    const idle = generateIdleFaceMotion3Json({ durationMs: 4000, fps: 30 });
+    motionFolder.file('idle_face.motion3.json', JSON.stringify(idle, null, '\t'));
+    motionFiles.push('motion/idle_face.motion3.json');
+  }
+
+  const expressionRefs = [];
+  const projectExpressions = project.expressions ?? [];
+  if (projectExpressions.length > 0) {
+    onProgress('Generating expression files...');
+    const expFolder = zip.folder('expressions');
+    for (const ex of projectExpressions) {
+      const id = ex.id ?? 'expression';
+      const fname = `${sanitizeName(id)}.exp3.json`;
+      const body = generateExp3Json({
+        parameters: (ex.parameters ?? []).map((p) => ({
+          id: p.id,
+          value: p.value,
+          blend: p.blend,
+        })),
+        fadeInTime: ex.fadeInTime,
+        fadeOutTime: ex.fadeOutTime,
+      });
+      expFolder.file(fname, JSON.stringify(body, null, '\t'));
+      expressionRefs.push({
+        Name: (ex.name ?? id).replace(/[^\w\s-]/g, '').trim() || id,
+        File: `expressions/${fname}`,
+      });
     }
   }
 
@@ -132,6 +168,15 @@ export async function exportLive2D(project, images, opts = {}) {
   const cdi3File = `${modelName}.cdi3.json`;
   zip.file(cdi3File, JSON.stringify(cdi3, null, '\t'));
 
+  const paramIdsForModel3 = new Set((project.parameters ?? []).map((p) => p.id));
+  const model3Groups = {};
+  if (paramIdsForModel3.has('ParamEyeLOpen') && paramIdsForModel3.has('ParamEyeROpen')) {
+    model3Groups.EyeBlink = ['ParamEyeLOpen', 'ParamEyeROpen'];
+  }
+  if (paramIdsForModel3.has('ParamMouthOpenY')) {
+    model3Groups.LipSync = ['ParamMouthOpenY'];
+  }
+
   // --- Step 5: Generate .model3.json ---
   onProgress('Generating model manifest...');
   const model3 = generateModel3Json({
@@ -139,6 +184,8 @@ export async function exportLive2D(project, images, opts = {}) {
     textureFiles,
     motionFiles,
     displayInfoFile: cdi3File,
+    expressions: expressionRefs,
+    groups: model3Groups,
   });
 
   zip.file(`${modelName}.model3.json`, JSON.stringify(model3, null, '\t'));
