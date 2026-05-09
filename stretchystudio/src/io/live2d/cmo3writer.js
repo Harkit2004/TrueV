@@ -435,6 +435,13 @@ export async function generateCmo3(input) {
     }
     if (!sourceMesh) {
       for (const m of meshes) {
+        if (m.tag === 'eyewhite' && m.vertices && m.vertices.length >= 6) {
+          sourceMesh = m; sourceTag = 'eyewhite'; break;
+        }
+      }
+    }
+    if (!sourceMesh) {
+      for (const m of meshes) {
         if (m.tag === `eyelash-${side}` && m.vertices && m.vertices.length >= 6) {
           sourceMesh = m; sourceTag = 'eyelash-fallback'; break;
         }
@@ -539,7 +546,11 @@ export async function generateCmo3(input) {
     // Union bbox across eyelash + eyewhite + iris for this side (P11)
     let uMinX = Infinity, uMinY = Infinity, uMaxX = -Infinity, uMaxY = -Infinity;
     for (const m of meshes) {
-      if (m.tag !== `eyelash-${side}` && m.tag !== `eyewhite-${side}` && m.tag !== `irides-${side}`) continue;
+      let include = m.tag === `eyelash-${side}` || m.tag === `eyewhite-${side}` || m.tag === `irides-${side}`;
+      if (!include && (m.tag === 'irides' || m.tag === 'eyes' || m.tag === 'eyewhite')) include = true;
+      if (!include && side === 'l' && m.tag === 'eyel') include = true;
+      if (!include && side === 'r' && m.tag === 'eyer') include = true;
+      if (!include) continue;
       const mv = m.vertices;
       if (!mv) continue;
       for (let i = 0; i < mv.length; i += 2) {
@@ -801,9 +812,12 @@ export async function generateCmo3(input) {
     const EYE_CLOSURE_TAGS = new Set([
       'eyelash-l', 'eyewhite-l', 'irides-l',
       'eyelash-r', 'eyewhite-r', 'irides-r',
+      // Unified iris / collapsed composite — use left-eye closure curve when available
+      'irides', 'eyes',
     ]);
     const closureSide = EYE_CLOSURE_TAGS.has(m.tag)
-      ? (m.tag.endsWith('-l') ? 'l' : 'r') : null;
+      ? (m.tag === 'irides' || m.tag === 'eyes' ? 'l' : m.tag.endsWith('-l') ? 'l' : 'r')
+      : null;
     const closureParamPid = closureSide === 'l' ? pidParamEyeLOpenEarly
       : closureSide === 'r' ? pidParamEyeROpenEarly : null;
     const hasEyelidClosure = !hasBakedKeyforms && closureSide !== null
@@ -2232,30 +2246,21 @@ export async function generateCmo3(input) {
     //
     // Strategy: compress all three toward Y at 80% of their respective grid heights.
     // All parts flatten to thin lines at the same relative position → reads as closed eye.
-    // Unified iris: blink (ParamEyeLOpen) + gaze (EyeBall X/Y) so CLIP mask keyforms
-    // stay consistent with split irides-l/-r. When open (1), apply gaze; when closed (0),
-    // compress to lower lid line (kX/kY ignored at closed extremes).
+    // Unified iris: gaze only on the rig warp (2 params) — Cubism FREE allows max 2
+    // parameters per object on a deformer; PRO allows 3. Blink uses per-vertex mesh
+    // keyforms when `irides` / `eyes` are in EYE_CLOSURE_TAGS (see closure block above).
     ['irides', {
       bindings: [
-        { pid: pidParamEyeLOpen, keys: [0, 1], desc: 'ParamEyeLOpen' },
         { pid: pidParamEyeBallX, keys: [-1, 0, 1], desc: 'ParamEyeBallX' },
         { pid: pidParamEyeBallY, keys: [-1, 0, 1], desc: 'ParamEyeBallY' },
       ],
-      shiftFn: (grid, gW, gH, [kOpen, kX, kY], gxS, gyS) => {
+      shiftFn: (grid, gW, gH, [kX, kY], gxS, gyS) => {
         const pos = new Float64Array(grid);
-        if (kOpen === 1) {
-          const dx = kX * gxS * 0.09;
-          const dy = -kY * gyS * 0.075;
-          for (let i = 0; i < pos.length; i += 2) {
-            pos[i] += dx;
-            pos[i + 1] += dy;
-          }
-          return pos;
-        }
-        const convergY = grid[1] + gyS * 0.80;
-        const factor = kOpen;
-        for (let i = 1; i < pos.length; i += 2) {
-          pos[i] = convergY + (grid[i] - convergY) * factor;
+        const dx = kX * gxS * 0.09;
+        const dy = -kY * gyS * 0.075;
+        for (let i = 0; i < pos.length; i += 2) {
+          pos[i]     += dx;
+          pos[i + 1] += dy;
         }
         return pos;
       },
@@ -2297,28 +2302,19 @@ export async function generateCmo3(input) {
         return pos;
       },
     }],
-    // V1/V2 collapsed eye layers (matchTag in armatureOrganizer.js)
+    // V1/V2 collapsed eye layers — 2-param gaze warp only (Cubism FREE per-object limit).
     ['eyes', {
       bindings: [
-        { pid: pidParamEyeLOpen, keys: [0, 1], desc: 'ParamEyeLOpen' },
         { pid: pidParamEyeBallX, keys: [-1, 0, 1], desc: 'ParamEyeBallX' },
         { pid: pidParamEyeBallY, keys: [-1, 0, 1], desc: 'ParamEyeBallY' },
       ],
-      shiftFn: (grid, gW, gH, [kOpen, kX, kY], gxS, gyS) => {
+      shiftFn: (grid, gW, gH, [kX, kY], gxS, gyS) => {
         const pos = new Float64Array(grid);
-        if (kOpen === 1) {
-          const dx = kX * gxS * 0.09;
-          const dy = -kY * gyS * 0.075;
-          for (let i = 0; i < pos.length; i += 2) {
-            pos[i] += dx;
-            pos[i + 1] += dy;
-          }
-          return pos;
-        }
-        const convergY = grid[1] + gyS * 0.80;
-        const factor = kOpen;
-        for (let i = 1; i < pos.length; i += 2) {
-          pos[i] = convergY + (grid[i] - convergY) * factor;
+        const dx = kX * gxS * 0.09;
+        const dy = -kY * gyS * 0.075;
+        for (let i = 0; i < pos.length; i += 2) {
+          pos[i]     += dx;
+          pos[i + 1] += dy;
         }
         return pos;
       },
@@ -2355,17 +2351,14 @@ export async function generateCmo3(input) {
         return pos;
       },
     }],
-    // Session 28: eyewhite-l / eyewhite-r are CLIP MASKS for irides-l/-r.
-    // Cubism Editor warns if a mask's rig deformers don't have keyforms
-    // matching the clipped child's parameter extremes. Identity keyforms on
-    // ParamEyeBallX × ParamEyeBallY (gaze) plus ParamAngleX × ParamAngleY
-    // (FaceParallax head tilt) so the mask stays defined across full ranges.
+    // Session 28: CLIP masks — identity rig warp on ParamEyeBallX × ParamEyeBallY only
+    // (2 params) so clipped irides stay aligned at gaze extremes without exceeding
+    // Cubism FREE “max 2 parameters per object” (PRO allows 3). Head tilt is applied
+    // by parent FaceParallax; extra angle bindings here were tripping the FREE limit.
     ['eyewhite-l', {
       bindings: [
         { pid: pidParamEyeBallX, keys: [-1, 0, 1], desc: 'ParamEyeBallX' },
         { pid: pidParamEyeBallY, keys: [-1, 0, 1], desc: 'ParamEyeBallY' },
-        { pid: pidParamAngleX, keys: [-30, 0, 30], desc: 'ParamAngleX' },
-        { pid: pidParamAngleY, keys: [-30, 0, 30], desc: 'ParamAngleY' },
       ],
       shiftFn: (grid) => new Float64Array(grid), // identity
     }],
@@ -2373,22 +2366,16 @@ export async function generateCmo3(input) {
       bindings: [
         { pid: pidParamEyeBallX, keys: [-1, 0, 1], desc: 'ParamEyeBallX' },
         { pid: pidParamEyeBallY, keys: [-1, 0, 1], desc: 'ParamEyeBallY' },
-        { pid: pidParamAngleX, keys: [-30, 0, 30], desc: 'ParamAngleX' },
-        { pid: pidParamAngleY, keys: [-30, 0, 30], desc: 'ParamAngleY' },
       ],
       shiftFn: (grid) => new Float64Array(grid), // identity
     }],
     ['eyewhite', {
       bindings: [
-        { pid: pidParamEyeLOpen, keys: [0, 1], desc: 'ParamEyeLOpen' },
         { pid: pidParamEyeBallX, keys: [-1, 0, 1], desc: 'ParamEyeBallX' },
         { pid: pidParamEyeBallY, keys: [-1, 0, 1], desc: 'ParamEyeBallY' },
-        { pid: pidParamAngleX, keys: [-30, 0, 30], desc: 'ParamAngleX' },
-        { pid: pidParamAngleY, keys: [-30, 0, 30], desc: 'ParamAngleY' },
       ],
       shiftFn: (grid) => new Float64Array(grid),
     }],
-    // eyewhite (unified layer name): same mask/keyform strategy as eyewhite-l/r for CLIP_RULES irides→eyewhite.
     ['eyelash', {
       bindings: [{ pid: pidParamEyeLOpen, keys: [0, 1], desc: 'ParamEyeLOpen' }],
       shiftFn: (grid, gW, gH, [k], gxS, gyS) => {
@@ -2854,6 +2841,7 @@ export async function generateCmo3(input) {
       // warp domain that covers the band.
       if (EYE_PART_TAGS.has(m.tag)) {
         const side = m.tag === 'eyel' ? 'l' : m.tag === 'eyer' ? 'r'
+          : (m.tag === 'irides' || m.tag === 'eyes' || m.tag === 'eyewhite') ? 'l'
           : m.tag.endsWith('-l') ? 'l' : m.tag.endsWith('-r') ? 'r' : null;
         const unionBb = side ? eyeUnionBboxPerSide.get(side) : null;
         if (unionBb) {
