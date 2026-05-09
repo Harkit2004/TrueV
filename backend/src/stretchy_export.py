@@ -2,8 +2,27 @@ from __future__ import annotations
 
 import asyncio
 import io
+import shutil
 import zipfile
 from pathlib import Path
+
+
+def resolve_node_executable(node_bin: str) -> str:
+    """
+    Bare names are resolved with PATH; absolute paths must exist.
+    Avoids opaque errno 2 from asyncio.create_subprocess_exec when `node` is missing from PATH.
+    """
+    raw = (node_bin or "").strip() or "node"
+    p = Path(raw).expanduser()
+    if p.is_file():
+        return str(p.resolve())
+    found = shutil.which(raw)
+    if found:
+        return found
+    raise RuntimeError(
+        f"Node.js executable not found: {node_bin!r}. Install Node 20+ or set NODE_BIN to the "
+        "full path (e.g. $(which node) or /usr/bin/node on Linux)."
+    )
 
 
 async def run_headless_live2d_export(
@@ -23,7 +42,7 @@ async def run_headless_live2d_export(
     script = root / script_rel
     if not script.is_file():
         raise FileNotFoundError(f"Headless export script missing: {script}")
-    node = node_bin
+    node = resolve_node_executable(node_bin)
     cmd: list[str] = [
         node,
         str(script),
@@ -34,12 +53,17 @@ async def run_headless_live2d_export(
         "--model-name",
         model_name,
     ]
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        cwd=str(root),
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            cwd=str(root),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError(
+            f"Cannot spawn Node for Live2D export ({node}): install Node or fix NODE_BIN. {exc}"
+        ) from exc
     try:
         stdout, stderr = await asyncio.wait_for(
             proc.communicate(),

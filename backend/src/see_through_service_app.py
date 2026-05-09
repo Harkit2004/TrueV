@@ -84,6 +84,8 @@ def create_see_through_worker_app() -> FastAPI:
             raise HTTPException(status_code=504, detail=str(exc)) from exc
         except RuntimeError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
 
         return Response(
             content=body_out,

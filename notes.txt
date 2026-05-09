@@ -49,6 +49,8 @@ ssh -N -L 8188:127.0.0.1:8188 -L 9105:127.0.0.1:9105 root@<droplet-ip>
 
 Stretchy Studio headless (GPU worker .env): clone/copy `stretchystudio` next to this repo, then `cd stretchystudio && npm install` (requires Node 20+; `canvas` native module needs build tools on Linux). Set `STRETCHY_STUDIO_ROOT` to that folder path. Full bundle: `POST /api/see-through/decompose?include_live2d=true` returns a zip containing the PSD and `live2d/<name>.cmo3`.
 
+Stretchy headless: `NODE_BIN` must point at a real `node` if your worker runs with a minimal PATH (set full path, e.g. output of `which node` on the droplet).
+
 This repo backend on your laptop (backend/.env) should point at the tunnels, e.g.:
 COMFYUI_BASE_URL=http://127.0.0.1:8188
 SEE_THROUGH_SERVICE_URL=http://127.0.0.1:9105
