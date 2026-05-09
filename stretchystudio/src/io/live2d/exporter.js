@@ -162,6 +162,7 @@ export async function exportLive2D(project, images, opts = {}) {
  * @param {boolean} [opts.generateRig=false] - Generate standard Live2D rig (warp deformers, standard params)
  * @param {boolean} [opts.generatePhysics] - Emit CPhysicsSettingsSourceSet (hair + clothing pendulums). Defaults to `generateRig`.
  * @param {string[]} [opts.physicsDisabledCategories] - Category names to SUPPRESS (e.g. ['hair'] for buzz-cut characters).
+ * @param {boolean} [opts.bundleRigDebugZip=true] - When true and rig debug exists, wrap `.cmo3` + `rig.log.json` in a ZIP (no animations). Set false for a bare CAFF `.cmo3` blob (e.g. headless CLI).
  * @param {function} [opts.onProgress]
  * @returns {Promise<Blob>} .cmo3 blob ready for download
  */
@@ -173,6 +174,7 @@ let _headlessCreateCanvas = null;
  * @param {Map} images
  * @param {object} opts
  * @param {(w: number, h: number) => import('canvas').Canvas} [opts.headlessCreateCanvas] - node-canvas factory for server-side export
+ * @param {boolean} [opts.bundleRigDebugZip=true] - ZIP `.cmo3` + `rig.log.json` when rig debug exists (no animations); false yields bare CAFF bytes
  */
 export async function exportLive2DProject(project, images, opts = {}) {
   const {
@@ -180,6 +182,7 @@ export async function exportLive2DProject(project, images, opts = {}) {
     generateRig = false,
     generatePhysics = generateRig,
     physicsDisabledCategories = null,
+    bundleRigDebugZip = true,
     onProgress = () => {},
     headlessCreateCanvas = null,
   } = opts;
@@ -336,8 +339,8 @@ export async function exportLive2DProject(project, images, opts = {}) {
   const hasAnimations = animations.length > 0 && deformerParamMap.size > 0;
   const hasRigDebug = !!rigDebugLog;
 
-  // Bundle into ZIP if we have animations OR a rig debug log (Phase 0 diagnostic).
-  if (hasAnimations || hasRigDebug) {
+  // Bundle into ZIP for animations, or when rig debug should ship as a sidecar (Phase 0 diagnostic).
+  if (hasAnimations || (hasRigDebug && bundleRigDebugZip)) {
     const cmo3FileName = `${modelName}.cmo3`;
     const { default: JSZip } = await import('jszip');
     const zip = new JSZip();

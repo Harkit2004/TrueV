@@ -197,6 +197,7 @@ export async function exportLive2dBlobFromPsdBuffer(psdBuffer, opts = {}) {
     modelName,
     generateRig: true,
     generatePhysics: true,
+    bundleRigDebugZip: false,
     headlessCreateCanvas: (w, h) => createCanvas(w, h),
     onProgress: opts.onProgress ?? (() => {}),
   });
