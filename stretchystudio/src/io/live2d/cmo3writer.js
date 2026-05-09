@@ -1260,7 +1260,6 @@ export async function generateCmo3(input) {
     // Skip groups that Hiyori handles via warps, not rotation deformers
     if (SKIP_ROTATION_ROLES.has(g.boneRole)) continue;
 
-    const t = g.transform || {};
     // Create a deformer for non-bone, non-skipped groups
     const [, pidDfGuid] = x.shared('CDeformerGuid', { uuid: uuid(), note: `Rot_${g.name || g.id}` });
     groupDeformerGuids.set(g.id, pidDfGuid);
@@ -1992,6 +1991,9 @@ export async function generateCmo3(input) {
     ['irides',      { col: 3, row: 3 }],
     ['irides-l',    { col: 3, row: 3 }],
     ['irides-r',    { col: 3, row: 3 }],
+    ['eyes',        { col: 3, row: 3 }],
+    ['eyel',        { col: 3, row: 3 }],
+    ['eyer',        { col: 3, row: 3 }],
     ['nose',        { col: 2, row: 2 }],  // small square
     ['mouth',       { col: 3, row: 2 }],  // horizontally long
     ['ears',        { col: 2, row: 2 }],
@@ -2011,20 +2013,18 @@ export async function generateCmo3(input) {
   //
   // Semantically this matches the user's "Blender proportional-edit with smooth falloff"
   // mental model: one deformation field applied continuously across the whole face.
+  // Keep in sync with HEAD_TAGS / IRIS_TAGS in armatureOrganizer.js (unified + split names).
   const FACE_PARALLAX_TAGS = new Set([
     'face', 'nose',
     'eyebrow', 'eyebrow-l', 'eyebrow-r',
-    'front hair', 'back hair',
-    'eyewhite-l', 'irides-l', 'eyelash-l',
-    'eyewhite-r', 'irides-r', 'eyelash-r',
+    'front hair', 'back hair', 'headwear',
+    'eyewhite', 'eyewhite-l', 'eyewhite-r',
+    'irides', 'irides-l', 'irides-r',
+    'eyes', 'eyel', 'eyer',
+    'eyelash', 'eyelash-l', 'eyelash-r',
     'mouth',
-    'ears-l', 'ears-r',
+    'ears', 'ears-l', 'ears-r',
   ]);
-  // Single depth for the unified face warp. Represents the face's overall protrusion
-  // from the rotation axis. Larger = bigger 3D-rotation effect. Spatial depth variation
-  // (per-region) can be added later for finer parallax between parts.
-  const FACE_PARALLAX_DEPTH = 0.5;
-
   // Session 20: Neck warp tags — meshes that follow the head tilt with a Y-gradient
   // (top row shifts, bottom row pinned at shoulders). Matches Hiyori's Neck Warp
   // pattern. See section 3d.1 for the emission.
@@ -2049,7 +2049,6 @@ export async function generateCmo3(input) {
   const pidParamBrowRY     = paramDefs.find(p => p.id === 'ParamBrowRY')?.pid;
   const pidParamMouthOpenY = paramDefs.find(p => p.id === 'ParamMouthOpenY')?.pid;
   const pidParamEyeLOpen   = paramDefs.find(p => p.id === 'ParamEyeLOpen')?.pid;
-  const pidParamEyeROpen   = paramDefs.find(p => p.id === 'ParamEyeROpen')?.pid;
   const pidParamHairFront  = paramDefs.find(p => p.id === 'ParamHairFront')?.pid;
   const pidParamHairBack   = paramDefs.find(p => p.id === 'ParamHairBack')?.pid;
   const pidParamSkirt      = paramDefs.find(p => p.id === 'ParamSkirt')?.pid;
@@ -2233,14 +2232,28 @@ export async function generateCmo3(input) {
     //
     // Strategy: compress all three toward Y at 80% of their respective grid heights.
     // All parts flatten to thin lines at the same relative position → reads as closed eye.
-    // EyeBallX/Y on iris deferred — requires nested warp layer (iris now uses EyeOpen).
+    // Unified iris: blink (ParamEyeLOpen) + gaze (EyeBall X/Y) so CLIP mask keyforms
+    // stay consistent with split irides-l/-r. When open (1), apply gaze; when closed (0),
+    // compress to lower lid line (kX/kY ignored at closed extremes).
     ['irides', {
-      bindings: [{ pid: pidParamEyeLOpen, keys: [0, 1], desc: 'ParamEyeLOpen' }],
-      shiftFn: (grid, gW, gH, [k], gxS, gyS) => {
+      bindings: [
+        { pid: pidParamEyeLOpen, keys: [0, 1], desc: 'ParamEyeLOpen' },
+        { pid: pidParamEyeBallX, keys: [-1, 0, 1], desc: 'ParamEyeBallX' },
+        { pid: pidParamEyeBallY, keys: [-1, 0, 1], desc: 'ParamEyeBallY' },
+      ],
+      shiftFn: (grid, gW, gH, [kOpen, kX, kY], gxS, gyS) => {
         const pos = new Float64Array(grid);
-        if (k === 1) return pos;
-        const convergY = grid[1] + gyS * 0.80; // lower eyelid line
-        const factor = k; // iris flattens near-zero
+        if (kOpen === 1) {
+          const dx = kX * gxS * 0.09;
+          const dy = -kY * gyS * 0.075;
+          for (let i = 0; i < pos.length; i += 2) {
+            pos[i] += dx;
+            pos[i + 1] += dy;
+          }
+          return pos;
+        }
+        const convergY = grid[1] + gyS * 0.80;
+        const factor = kOpen;
         for (let i = 1; i < pos.length; i += 2) {
           pos[i] = convergY + (grid[i] - convergY) * factor;
         }
@@ -2284,16 +2297,75 @@ export async function generateCmo3(input) {
         return pos;
       },
     }],
+    // V1/V2 collapsed eye layers (matchTag in armatureOrganizer.js)
+    ['eyes', {
+      bindings: [
+        { pid: pidParamEyeLOpen, keys: [0, 1], desc: 'ParamEyeLOpen' },
+        { pid: pidParamEyeBallX, keys: [-1, 0, 1], desc: 'ParamEyeBallX' },
+        { pid: pidParamEyeBallY, keys: [-1, 0, 1], desc: 'ParamEyeBallY' },
+      ],
+      shiftFn: (grid, gW, gH, [kOpen, kX, kY], gxS, gyS) => {
+        const pos = new Float64Array(grid);
+        if (kOpen === 1) {
+          const dx = kX * gxS * 0.09;
+          const dy = -kY * gyS * 0.075;
+          for (let i = 0; i < pos.length; i += 2) {
+            pos[i] += dx;
+            pos[i + 1] += dy;
+          }
+          return pos;
+        }
+        const convergY = grid[1] + gyS * 0.80;
+        const factor = kOpen;
+        for (let i = 1; i < pos.length; i += 2) {
+          pos[i] = convergY + (grid[i] - convergY) * factor;
+        }
+        return pos;
+      },
+    }],
+    ['eyel', {
+      bindings: [
+        { pid: pidParamEyeBallX, keys: [-1, 0, 1], desc: 'ParamEyeBallX' },
+        { pid: pidParamEyeBallY, keys: [-1, 0, 1], desc: 'ParamEyeBallY' },
+      ],
+      shiftFn: (grid, gW, gH, [kX, kY], gxS, gyS) => {
+        const pos = new Float64Array(grid);
+        const dx = kX * gxS * 0.09;
+        const dy = -kY * gyS * 0.075;
+        for (let i = 0; i < pos.length; i += 2) {
+          pos[i]     += dx;
+          pos[i + 1] += dy;
+        }
+        return pos;
+      },
+    }],
+    ['eyer', {
+      bindings: [
+        { pid: pidParamEyeBallX, keys: [-1, 0, 1], desc: 'ParamEyeBallX' },
+        { pid: pidParamEyeBallY, keys: [-1, 0, 1], desc: 'ParamEyeBallY' },
+      ],
+      shiftFn: (grid, gW, gH, [kX, kY], gxS, gyS) => {
+        const pos = new Float64Array(grid);
+        const dx = kX * gxS * 0.09;
+        const dy = -kY * gyS * 0.075;
+        for (let i = 0; i < pos.length; i += 2) {
+          pos[i]     += dx;
+          pos[i + 1] += dy;
+        }
+        return pos;
+      },
+    }],
     // Session 28: eyewhite-l / eyewhite-r are CLIP MASKS for irides-l/-r.
     // Cubism Editor warns if a mask's rig deformers don't have keyforms
-    // matching the clipped child's parameter extremes. Give the eyewhite
-    // rig warp IDENTITY keyforms on ParamEyeBallX × ParamEyeBallY so the
-    // mask has defined positions across the iris's full gaze range (with
-    // zero actual displacement — the white doesn't follow the iris).
+    // matching the clipped child's parameter extremes. Identity keyforms on
+    // ParamEyeBallX × ParamEyeBallY (gaze) plus ParamAngleX × ParamAngleY
+    // (FaceParallax head tilt) so the mask stays defined across full ranges.
     ['eyewhite-l', {
       bindings: [
         { pid: pidParamEyeBallX, keys: [-1, 0, 1], desc: 'ParamEyeBallX' },
         { pid: pidParamEyeBallY, keys: [-1, 0, 1], desc: 'ParamEyeBallY' },
+        { pid: pidParamAngleX, keys: [-30, 0, 30], desc: 'ParamAngleX' },
+        { pid: pidParamAngleY, keys: [-30, 0, 30], desc: 'ParamAngleY' },
       ],
       shiftFn: (grid) => new Float64Array(grid), // identity
     }],
@@ -2301,13 +2373,18 @@ export async function generateCmo3(input) {
       bindings: [
         { pid: pidParamEyeBallX, keys: [-1, 0, 1], desc: 'ParamEyeBallX' },
         { pid: pidParamEyeBallY, keys: [-1, 0, 1], desc: 'ParamEyeBallY' },
+        { pid: pidParamAngleX, keys: [-30, 0, 30], desc: 'ParamAngleX' },
+        { pid: pidParamAngleY, keys: [-30, 0, 30], desc: 'ParamAngleY' },
       ],
       shiftFn: (grid) => new Float64Array(grid), // identity
     }],
     ['eyewhite', {
       bindings: [
+        { pid: pidParamEyeLOpen, keys: [0, 1], desc: 'ParamEyeLOpen' },
         { pid: pidParamEyeBallX, keys: [-1, 0, 1], desc: 'ParamEyeBallX' },
         { pid: pidParamEyeBallY, keys: [-1, 0, 1], desc: 'ParamEyeBallY' },
+        { pid: pidParamAngleX, keys: [-30, 0, 30], desc: 'ParamAngleX' },
+        { pid: pidParamAngleY, keys: [-30, 0, 30], desc: 'ParamAngleY' },
       ],
       shiftFn: (grid) => new Float64Array(grid),
     }],
@@ -2582,12 +2659,13 @@ export async function generateCmo3(input) {
   // All eye parts (eyelash, eyewhite, irides) for the same eye use this shared curve.
   // Fallback to eyelash if eyewhite not available.
   const EYEWHITE_TAGS = new Set(['eyewhite', 'eyewhite-l', 'eyewhite-r']);
-  const EYELASH_TAGS = new Set(['eyelash', 'eyelash-l', 'eyelash-r']);
+  const EYELASH_TAGS = new Set(['eyelash', 'eyelash-l', 'eyelash-r', 'eyes', 'eyel', 'eyer']);
   const EYE_SOURCE_TAGS = new Set([...EYEWHITE_TAGS, ...EYELASH_TAGS]);
   const EYE_PART_TAGS = new Set([
     'eyelash', 'eyelash-l', 'eyelash-r',
     'eyewhite', 'eyewhite-l', 'eyewhite-r',
     'irides', 'irides-l', 'irides-r',
+    'eyes', 'eyel', 'eyer',
   ]);
   const eyeContexts = []; // { tag, isEyewhite, curvePoints, bboxCenterX, bboxCenterY }
   if (generateRig) {
@@ -2715,7 +2793,11 @@ export async function generateCmo3(input) {
   // Find matching eye ctx: prefer eyewhite source (more accurate), same side, proximity
   const findEyeCtx = (tag, bboxCx, bboxCy) => {
     if (eyeContexts.length === 0) return null;
-    const side = tag.endsWith('-l') ? 'l' : tag.endsWith('-r') ? 'r' : '';
+    let side = '';
+    if (tag === 'eyel') side = 'l';
+    else if (tag === 'eyer') side = 'r';
+    else if (tag.endsWith('-l')) side = 'l';
+    else if (tag.endsWith('-r')) side = 'r';
     // First try: eyewhite with matching side
     let pool = eyeContexts.filter(c => c.isEyewhite &&
       ((side === 'l' && c.tag.endsWith('-l')) ||
@@ -2771,7 +2853,8 @@ export async function generateCmo3(input) {
       // closed lines). Union bbox ensures all eye-part meshes share a common
       // warp domain that covers the band.
       if (EYE_PART_TAGS.has(m.tag)) {
-        const side = m.tag.endsWith('-l') ? 'l' : m.tag.endsWith('-r') ? 'r' : null;
+        const side = m.tag === 'eyel' ? 'l' : m.tag === 'eyer' ? 'r'
+          : m.tag.endsWith('-l') ? 'l' : m.tag.endsWith('-r') ? 'r' : null;
         const unionBb = side ? eyeUnionBboxPerSide.get(side) : null;
         if (unionBb) {
           if (unionBb.minX < bxMin) bxMin = unionBb.minX;
@@ -3554,6 +3637,9 @@ export async function generateCmo3(input) {
     'irides':    'eyewhite',
     'irides-l':  'eyewhite-l',
     'irides-r':  'eyewhite-r',
+    'eyes':      'eyewhite',
+    'eyel':      'eyewhite-l',
+    'eyer':      'eyewhite-r',
   };
 
   for (const pm of perMesh) {
