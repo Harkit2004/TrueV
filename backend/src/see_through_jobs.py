@@ -19,6 +19,7 @@ async def run_see_through_decompose_job(
     repo: Path,
     python_exe: str,
     timeout_sec: float,
+    inference_extra_args: list[str] | None = None,
 ) -> tuple[Path, Path, str]:
     """
     Run inference in a temp directory. Returns (job_dir, psd_path, suggested_download_name).
@@ -54,6 +55,7 @@ async def run_see_through_decompose_job(
             save_dir=job_dir,
             timeout_sec=timeout_sec,
             group_offload=group_offload,
+            inference_extra_args=inference_extra_args,
         )
     except TimeoutError as exc:
         shutil.rmtree(job_dir, ignore_errors=True)

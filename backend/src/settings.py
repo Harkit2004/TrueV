@@ -94,6 +94,13 @@ class Settings(BaseSettings):
         description="Python from the See-through conda env (worker host).",
     )
     see_through_timeout_sec: float = Field(default=7200.0)
+    see_through_inference_extra_args: str = Field(
+        default="",
+        description=(
+            "Extra CLI tokens appended to inference_psd.py (worker/local). "
+            "Shell-style quoting via shlex; env: SEE_THROUGH_INFERENCE_EXTRA_ARGS."
+        ),
+    )
 
     stretchy_studio_root: StretchyStudioRoot = Field(
         default=None,

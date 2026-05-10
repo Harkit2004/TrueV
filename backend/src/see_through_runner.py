@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import shlex
 import shutil
 from pathlib import Path
 
@@ -11,6 +12,14 @@ def inference_script_path(repo: Path) -> Path:
 
 def expected_psd_path(save_dir: Path, image_stem: str) -> Path:
     return save_dir / f"{image_stem}.psd"
+
+
+def parse_inference_extra_args(raw: str | None) -> list[str]:
+    """Split SEE_THROUGH_INFERENCE_EXTRA_ARGS for subprocess (POSIX shlex rules)."""
+    s = (raw or "").strip()
+    if not s:
+        return []
+    return shlex.split(s)
 
 
 def resolve_python_executable(python_exe: str) -> str:
@@ -40,6 +49,7 @@ async def run_inference_psd(
     save_dir: Path,
     timeout_sec: float,
     group_offload: bool,
+    inference_extra_args: list[str] | None = None,
 ) -> None:
     repo_root = repo.expanduser().resolve()
     if not repo_root.is_dir():
@@ -66,6 +76,9 @@ async def run_inference_psd(
     ]
     if group_offload:
         cmd.append("--group_offload")
+    extra = inference_extra_args or []
+    if extra:
+        cmd.extend(extra)
 
     proc = await asyncio.create_subprocess_exec(
         *cmd,
