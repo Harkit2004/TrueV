@@ -43,6 +43,7 @@ import {
 import { emitNeckWarp, emitFaceRotation } from './cmo3/bodyRig.js';
 import { emitFaceParallax } from './cmo3/faceParallax.js';
 import { emitPhysicsSettings } from './cmo3/physics.js';
+import { EYE_CLOSURE_TAGS } from './faceRigStandard.js';
 
 // ---------- Main generator ----------
 
@@ -814,12 +815,6 @@ export async function generateCmo3(input) {
     // Session 17: per-eye closure via per-vertex CArtMeshForm keyforms.
     // Eyelash/eyewhite/irides (both sides) all collapse to their side's eyelash band.
     // Bypasses warp-grid coarseness — bottom contour truly stays static.
-    const EYE_CLOSURE_TAGS = new Set([
-      'eyelash-l', 'eyewhite-l', 'irides-l',
-      'eyelash-r', 'eyewhite-r', 'irides-r',
-      // Unified iris / collapsed composite — use left-eye closure curve when available
-      'irides', 'eyes',
-    ]);
     const closureSide = EYE_CLOSURE_TAGS.has(m.tag)
       ? (m.tag === 'irides' || m.tag === 'eyes' ? 'l' : m.tag.endsWith('-l') ? 'l' : 'r')
       : null;

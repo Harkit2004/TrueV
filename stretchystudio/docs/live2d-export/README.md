@@ -12,7 +12,7 @@ Export Stretchy Studio projects to Live2D Cubism format — both runtime (.moc3)
 
 ## Features
 
-- **Runtime export** (.moc3): texture atlas, draw order, parameters, animations (.motion3.json)
+- **Runtime export** (.moc3): texture atlas, draw order, parameters, animations (.motion3.json). Tagged `mouth` / eye meshes also get preset blink and mouth-demo motions (see **Blink and lip sync** below).
 - **Project export** (.cmo3): per-mesh textures, part hierarchy, rotation deformers, parameter bindings
 - **Animation export** (.can3): parameter keyframes with Bezier curves, auto-generated alongside .cmo3
 - **Bone weight baking**: monolithic limb meshes with per-vertex bone weights are exported as art mesh keyforms — smooth elbow/knee bending without mesh splitting
@@ -30,6 +30,14 @@ Produces a Cubism Editor 5.0 project file for further editing.
 
 When animations exist, exports a ZIP containing both `.cmo3` (model) and `.can3` (animation).
 
+### Blink and lip sync (no extra drawable layers)
+
+Face motion uses Live2D-standard parameters on the existing rig: `ParamEyeLOpen`, `ParamEyeROpen`, `ParamMouthOpenY`.
+
+1. **Runtime (.moc3 ZIP)** — If meshes are tagged (`mouth`, `eyelash-l` / `eyewhite-l` / `irides-l`, and the right-eye counterparts, or `irides` / `eyes`), the export adds those parameters, warp-driven approximations on the atlas model, optional preset motions (`EyeBlink__blink_loop.motion3.json`, `Idle__mouth_demo.motion3.json`), and `model3.json` **Groups** entries `EyeBlink` / `LipSync` where applicable. For higher fidelity eye closure, prefer the project export path.
+
+2. **Project (.cmo3) + Cubism Editor** — Open the `.cmo3` in **Cubism Editor 5**, use **Eye Blinking** on the eye-open parameters and **Lip Sync** on `ParamMouthOpenY`, then **Publish** the runtime model for your engine. The `.can3` from Stretchy includes stub **Eye Blink** and **Lip Sync** effects so the Editor can bind them without recovering the timeline.
+
 ## Code Structure
 
 All export code is in `src/io/live2d/`:
@@ -44,6 +52,8 @@ All export code is in `src/io/live2d/`:
 | `cmo3/deformerEmit.js` | Shared warp/keyform emit helpers (structural warps, KeyformBindings, uniform grids) |
 | `cmo3/bodyRig.js` | `emitNeckWarp` + `emitFaceRotation` |
 | `cmo3/faceParallax.js` | `emitFaceParallax` — protected regions, A.3/A.6b, `computeFpKeyform`, eye amp (#3), far-eye squash (#5), symmetrizeKeyform |
+| `faceRigStandard.js` | Shared eye/mouth tags, runtime face param merge, `model3.json` EyeBlink/LipSync groups |
+| `presetFaceMotions.js` | Preset `.motion3.json` clips for blink / mouth demo |
 | `bodyAnalyzer.js` | Torso/head bbox analysis driving body-warp grid |
 | `can3writer.js` | .can3 XML generator (animation scenes, parameter keyframes) |
 | `xmlbuilder.js` | Shared XML builder for .cmo3 and .can3 generators |

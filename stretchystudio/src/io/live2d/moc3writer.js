@@ -18,6 +18,17 @@
  * @module io/live2d/moc3writer
  */
 
+import {
+  blendEyeWarpSquash,
+  blendMouthWarpOpen,
+  faceRigHasAnyTarget,
+  makeWarpGridPoints,
+  mergeFaceStandardParams,
+  meshCanvasBBox,
+  nearestAncestorGroupId,
+  resolveFaceRigMeshes,
+} from './faceRigStandard.js';
+
 // Source: [ref][py-moc3] — format constants from reference file + py-moc3
 const MAGIC = [0x4D, 0x4F, 0x43, 0x33]; // "MOC3"
 const HEADER_SIZE = 64;
@@ -302,6 +313,70 @@ class BinaryWriter {
   }
 }
 
+const FACE_WARP_COL = 2;
+const FACE_WARP_ROW = 2;
+
+/**
+ * Extra warp deformers so runtime .moc3 can drive blink / mouth with the same
+ * parameter IDs as .cmo3 (approximation via 3×3 grids on tagged meshes).
+ *
+ * @param {object} project
+ * @param {Array<{id:string,type?:string,parent?:string|null}>} partNodes
+ * @param {{ mouth: object|null, eyeL: object|null, eyeR: object|null }} faceTargets
+ * @returns {object[]}
+ */
+function buildSyntheticFaceWarpNodes(project, partNodes, faceTargets) {
+  const col = FACE_WARP_COL;
+  const row = FACE_WARP_ROW;
+  const out = [];
+
+  const defaultGroupId = partNodes[0]?.id ?? null;
+
+  const groupForPart = (part) => {
+    const gid = nearestAncestorGroupId(project, part.id);
+    return gid ?? defaultGroupId;
+  };
+
+  const pushWarp = (meshPart, paramId, warpId) => {
+    const bbox = meshCanvasBBox(meshPart);
+    if (!bbox || bbox.w < 2 || bbox.h < 2) return;
+    const pad = Math.max(4, Math.min(bbox.w, bbox.h) * 0.04);
+    const gx = bbox.minX - pad;
+    const gy = bbox.minY - pad;
+    const gw = bbox.w + pad * 2;
+    const gh = bbox.h + pad * 2;
+    const rest = makeWarpGridPoints(gx, gy, gw, gh, col, row);
+    let closed = rest;
+    if (paramId === 'ParamMouthOpenY') {
+      closed = blendMouthWarpOpen(rest, col, row, 1, Math.max(10, bbox.h * 0.14));
+    } else {
+      closed = blendEyeWarpSquash(rest, col, row, 1);
+    }
+    const parentGid = groupForPart(meshPart);
+    out.push({
+      type: 'warpDeformer',
+      id: warpId,
+      parent: parentGid,
+      col,
+      row,
+      gridX: gx,
+      gridY: gy,
+      gridW: gw,
+      gridH: gh,
+      parameterId: paramId,
+      visible: true,
+      __faceKeyforms: [{ value: rest }, { value: closed }],
+      __targetMeshId: meshPart.id,
+    });
+  };
+
+  if (faceTargets.mouth) pushWarp(faceTargets.mouth, 'ParamMouthOpenY', '__ss_face_mouth_warp');
+  if (faceTargets.eyeL) pushWarp(faceTargets.eyeL, 'ParamEyeLOpen', '__ss_face_eyeL_warp');
+  if (faceTargets.eyeR) pushWarp(faceTargets.eyeR, 'ParamEyeROpen', '__ss_face_eyeR_warp');
+
+  return out;
+}
+
 
 // ---------------------------------------------------------------------------
 // Data preparation — convert project data to moc3 section arrays
@@ -346,12 +421,22 @@ function buildSectionData(input) {
   // Collect parameters
   const params = project.parameters ?? [];
 
-  const paramList = params.length > 0
-    ? params
+  let paramList = params.length > 0
+    ? [...params]
     : [{ id: 'ParamOpacity', min: 0, max: 1, default: 1 }];
 
+  const faceTargets = resolveFaceRigMeshes(project, regions);
+  const hasFaceRigTargets = faceRigHasAnyTarget(faceTargets);
+  if (hasFaceRigTargets) {
+    mergeFaceStandardParams(paramList);
+  }
+
   // --- Warp deformer analysis (needs paramList) ---
-  const wdNodes = (project.nodes ?? []).filter(n => n.type === 'warpDeformer');
+  const userWdNodes = (project.nodes ?? []).filter(n => n.type === 'warpDeformer');
+  const syntheticFaceWds = hasFaceRigTargets
+    ? buildSyntheticFaceWarpNodes(project, partNodes, faceTargets)
+    : [];
+  const wdNodes = [...userWdNodes, ...syntheticFaceWds];
   const wdVertsMap = new Map(); // wdId → keyframes from mesh_verts tracks
   for (const anim of (project.animations ?? [])) {
     for (const track of (anim.tracks ?? [])) {
@@ -366,7 +451,11 @@ function buildSectionData(input) {
     const col = wd.col ?? 2;
     const row = wd.row ?? 2;
     const gridPts = (col + 1) * (row + 1);
-    const kfs = wdVertsMap.get(wd.id) ?? [];
+    let kfs = wdVertsMap.get(wd.id);
+    if (!kfs || kfs.length === 0) {
+      if (wd.__faceKeyforms?.length > 0) kfs = wd.__faceKeyforms;
+      else kfs = [];
+    }
     const numKf = Math.max(1, kfs.length);
     const param = wd.parameterId ? paramList.find(p => p.id === wd.parameterId) : null;
     const paramIdx = param ? paramList.indexOf(param) : -1;
@@ -400,6 +489,11 @@ function buildSectionData(input) {
       cur = cur.parent ? (project.nodes.find(n => n.id === cur.parent) ?? null) : null;
     }
   }
+  for (let si = 0; si < syntheticFaceWds.length; si++) {
+    const sw = syntheticFaceWds[si];
+    const wdIdx = userWdNodes.length + si;
+    if (sw.__targetMeshId) meshWdIndexMap.set(sw.__targetMeshId, wdIdx);
+  }
 
   // Build Part ID → index map
   const partIdMap = new Map();
@@ -408,7 +502,7 @@ function buildSectionData(input) {
   // --- Counts ---
   const numParts = partNodes.length;
   const numArtMeshes = meshParts.length;
-  const numParams = params.length > 0 ? params.length : 1; // At least 1 parameter (ParamOpacity)
+  const numParams = paramList.length;
   const numArtMeshKeyforms = numArtMeshes; // 1 keyform per mesh (default pose)
   const numPartKeyforms = numParts;
 

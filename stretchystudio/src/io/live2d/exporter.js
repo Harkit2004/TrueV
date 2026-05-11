@@ -16,6 +16,16 @@ import { packTextureAtlas } from './textureAtlas.js';
 import { generateCmo3 } from './cmo3writer.js';
 import { generateCan3 } from './can3writer.js';
 import { matchTag } from '../armatureOrganizer.js';
+import {
+  faceRigHasAnyTarget,
+  FACE_STANDARD_PARAM_DEFS,
+  model3GroupsForFaceRig,
+  resolveFaceRigMeshes,
+} from './faceRigStandard.js';
+import {
+  generatePresetBlinkMotion3Json,
+  generatePresetMouthMotion3Json,
+} from './presetFaceMotions.js';
 
 /**
  * @typedef {Object} ExportOptions
@@ -59,6 +69,9 @@ export async function exportLive2D(project, images, opts = {}) {
     textureFiles.push(`${textureDir}/${filename}`);
   }
 
+  const faceTargets = resolveFaceRigMeshes(project, regions);
+  const hasFaceRigTargets = faceRigHasAnyTarget(faceTargets);
+
   // --- Step 2: Generate .moc3 ---
   onProgress('Generating .moc3 binary...');
   const moc3Buffer = generateMoc3({
@@ -99,16 +112,34 @@ export async function exportLive2D(project, images, opts = {}) {
 
   const motionFiles = [];
   let motionFolder = null;
-  if (exportMotions && project.animations?.length > 0) {
+  const includeFacePresetMotions = exportMotions && hasFaceRigTargets;
+  if (exportMotions && ((project.animations?.length ?? 0) > 0 || includeFacePresetMotions)) {
     onProgress('Generating motion files...');
     motionFolder = zip.folder('motion');
 
-    for (const anim of project.animations) {
+    for (const anim of (project.animations ?? [])) {
       const sanitized = sanitizeName(anim.name);
       const filename = `${sanitized}.motion3.json`;
       const motion = generateMotion3Json(anim, { parameterMap });
       motionFolder.file(filename, JSON.stringify(motion, null, '\t'));
       motionFiles.push(`motion/${filename}`);
+    }
+
+    if (includeFacePresetMotions) {
+      const blinkFile = 'EyeBlink__blink_loop.motion3.json';
+      motionFolder.file(
+        blinkFile,
+        JSON.stringify(generatePresetBlinkMotion3Json(), null, '\t'),
+      );
+      motionFiles.push(`motion/${blinkFile}`);
+      if (faceTargets.mouth) {
+        const mouthFile = 'Idle__mouth_demo.motion3.json';
+        motionFolder.file(
+          mouthFile,
+          JSON.stringify(generatePresetMouthMotion3Json(), null, '\t'),
+        );
+        motionFiles.push(`motion/${mouthFile}`);
+      }
     }
   }
 
@@ -144,12 +175,32 @@ export async function exportLive2D(project, images, opts = {}) {
     n.type === 'part' && n.mesh && n.visible !== false && regions.has(n.id)
   );
 
+  const cdiParamRows = (project.parameters ?? []).map(p => ({
+    id: p.id,
+    name: p.name ?? p.id,
+    groupId: p.groupId,
+  }));
+  if (hasFaceRigTargets) {
+    const seen = new Set(cdiParamRows.map(p => p.id));
+    const faceLabels = {
+      ParamEyeLOpen: 'Eye L Open',
+      ParamEyeROpen: 'Eye R Open',
+      ParamMouthOpenY: 'Mouth Open',
+    };
+    for (const d of FACE_STANDARD_PARAM_DEFS) {
+      if (!seen.has(d.id)) {
+        cdiParamRows.push({
+          id: d.id,
+          name: faceLabels[d.id] ?? d.id,
+          groupId: null,
+        });
+        seen.add(d.id);
+      }
+    }
+  }
+
   const cdi3 = generateCdi3Json({
-    parameters: (project.parameters ?? []).map(p => ({
-      id: p.id,
-      name: p.name ?? p.id,
-      groupId: p.groupId,
-    })),
+    parameters: cdiParamRows,
     parts: groups.map(g => ({
       id: g.id,
       name: g.name ?? g.id,
@@ -164,6 +215,7 @@ export async function exportLive2D(project, images, opts = {}) {
   if (paramIdsForModel3.has('ParamMouthOpenY')) {
     model3Groups.LipSync = ['ParamMouthOpenY'];
   }
+  Object.assign(model3Groups, model3GroupsForFaceRig(faceTargets));
 
   // --- Step 5: Generate .model3.json ---
   onProgress('Generating model manifest...');

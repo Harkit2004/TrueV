@@ -99,8 +99,9 @@ export function generateModel3Json(opts) {
 /**
  * Organize motion files into groups.
  *
- * If motion file names contain a group prefix (e.g. "idle_wave.motion3.json"),
- * they are grouped by that prefix. Otherwise all go under "Idle".
+ * If the file basename contains `__`, the prefix is used as the group name
+ * (e.g. `EyeBlink__blink_loop.motion3.json` → group `EyeBlink`). Otherwise
+ * motions are placed under `Idle`.
  *
  * @param {string[]} motionFiles
  * @returns {Object<string, {File: string}[]>}
@@ -109,8 +110,12 @@ function buildMotionGroups(motionFiles) {
   const groups = {};
 
   for (const file of motionFiles) {
-    // Default group is "Idle"
-    const groupName = 'Idle';
+    const base = file.replace(/^.*\//, '').replace(/\.motion3\.json$/i, '');
+    let groupName = 'Idle';
+    if (base.includes('__')) {
+      const prefix = base.split('__')[0];
+      if (prefix) groupName = prefix;
+    }
     if (!groups[groupName]) groups[groupName] = [];
     groups[groupName].push({ File: file });
   }
