@@ -24,7 +24,6 @@ from src.comfy_client import (
     wait_for_outputs,
 )
 from src.see_through_jobs import run_see_through_decompose_job
-from src.see_through_runner import parse_inference_extra_args
 from src.see_through_proxy import proxy_decompose_to_remote
 from src.settings import Settings, get_settings
 from src.stretchy_export import build_decompose_attachment_bytes
@@ -311,9 +310,6 @@ def create_app() -> FastAPI:
             repo=repo,
             python_exe=settings.see_through_python,
             timeout_sec=settings.see_through_timeout_sec,
-            inference_extra_args=parse_inference_extra_args(
-                settings.see_through_inference_extra_args
-            ),
         )
 
         def cleanup_job(d: Path = job_dir) -> None:

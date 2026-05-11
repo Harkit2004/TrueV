@@ -1660,7 +1660,7 @@ export default function CanvasViewport({
     useParameterStore.getState().setParameterValue(paramId, newMax);
   }, [updateParameter, updateProject]);
 
-  /* ── Wizard: create Idle animation clip with bone rotation + blink tracks ── */
+  /* ── Wizard: create Idle animation clip with torso + head bone rotation ── */
   const createIdleAnimation = useCallback(() => {
     updateProject((proj) => {
       if (proj.animations.find(a => a.name === 'Idle')) return;
@@ -1690,22 +1690,6 @@ export default function CanvasViewport({
             { time: 2000, value:  0 },
             { time: 3000, value: -1 },
             { time: 4000, value:  0 },
-          ],
-        });
-      }
-
-      // Opacity blink on any part whose name starts with "eyelash" or "eyelid"
-      for (const node of proj.nodes) {
-        if (node.type !== 'part') continue;
-        if (!/^eyelash|^eyelid/i.test(node.name)) continue;
-        tracks.push({
-          nodeId: node.id, property: 'opacity',
-          keyframes: [
-            { time:    0, value: 1 },
-            { time: 3400, value: 1 },
-            { time: 3550, value: 0 },
-            { time: 3700, value: 1 },
-            { time: 4000, value: 1 },
           ],
         });
       }

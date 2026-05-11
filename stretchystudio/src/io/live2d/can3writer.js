@@ -34,7 +34,6 @@ const IMPORT_PIS = [
   'com.live2d.cubism.doc.animation.CSceneSource',
   'com.live2d.cubism.doc.animation.formAnimation.FormAnimationSet',
   'com.live2d.cubism.doc.animation.movie.core.CMvMovieInfo',
-  'com.live2d.cubism.doc.animation.movie.effect.CMvEffect_EyeBlink',
   'com.live2d.cubism.doc.animation.movie.effect.CMvEffect_LipSync',
   'com.live2d.cubism.doc.animation.movie.effect.CMvEffect_Live2DParameter',
   'com.live2d.cubism.doc.animation.movie.effect.CMvEffect_Live2DPartsVisible',
@@ -413,20 +412,6 @@ export async function generateCan3(input) {
     x.subRef(visualEffect, 'CMvAttrI', pidFrameStep, { 'xs.n': 'attrFrameStep' });
     x.subRef(visualEffect, 'CMvAttrF', pidArtPathWidth, { 'xs.n': 'attrArtPathWidth' });
 
-    // CMvEffect_EyeBlink (empty stub with required fields — Hiyori pattern)
-    const [eyeBlinkEffect, pidEyeBlink] = x.shared('CMvEffect_EyeBlink');
-    const ebSuper = x.sub(eyeBlinkEffect, 'ICMvEffect', { 'xs.n': 'super' });
-    x.sub(ebSuper, 'CEffectId', { 'xs.n': 'id', idstr: 'eyeBlink' });
-    x.sub(ebSuper, 'b', { 'xs.n': 'isActive' }).text = 'false';
-    x.sub(ebSuper, 'b', { 'xs.n': 'canDelete' }).text = 'true';
-    x.sub(ebSuper, 'array', { 'xs.n': 'attrList', count: '0', type: 'ICMvAttr' });
-    x.sub(ebSuper, 'hash_map', { 'xs.n': 'attrMap', count: '0' });
-    x.subRef(ebSuper, 'CMvTrack_Live2DModel_Source', pidModelTrack, { 'xs.n': 'track' });
-    // EyeBlink-specific fields (Hiyori pattern)
-    x.sub(eyeBlinkEffect, 'carray_list', { 'xs.n': 'effectParameterAttrIds', count: '0' });
-    x.sub(eyeBlinkEffect, 'b', { 'xs.n': 'invert' }).text = 'false';
-    x.sub(eyeBlinkEffect, 'b', { 'xs.n': 'relative' }).text = 'true';
-
     // CMvEffect_LipSync (empty stub with required fields — Hiyori pattern)
     const [lipSyncEffect, pidLipSync] = x.shared('CMvEffect_LipSync');
     const lsSuper = x.sub(lipSyncEffect, 'ICMvEffect', { 'xs.n': 'super' });
@@ -500,9 +485,8 @@ export async function generateCan3(input) {
     x.subRef(mtSup, 'CMvEffect_VisualDefault', pidVisualEffect, { 'xs.n': 'visualEffect' });
     const mtEffMgr = x.sub(mtSup, 'CMvEffectManager', { 'xs.n': 'effectManager' });
     const mtEffList = x.sub(mtEffMgr, 'array', {
-      'xs.n': 'effectList', count: '5', type: 'ICMvEffect',
+      'xs.n': 'effectList', count: '4', type: 'ICMvEffect',
     });
-    x.subRef(mtEffList, 'CMvEffect_EyeBlink', pidEyeBlink);
     x.subRef(mtEffList, 'CMvEffect_LipSync', pidLipSync);
     x.subRef(mtEffList, 'CMvEffect_Live2DParameter', pidParamEffect);
     x.subRef(mtEffList, 'CMvEffect_Live2DPartsVisible', pidPartsEffect);
@@ -514,7 +498,7 @@ export async function generateCan3(input) {
     x.subRef(modelTrack, 'CMvEffect_Live2DParameter', pidParamEffect, { 'xs.n': 'keyParamEffect' });
     x.subRef(modelTrack, 'CMvEffect_Live2DPartsVisible', pidPartsEffect, { 'xs.n': 'partsVisibleEffect' });
     x.subRef(modelTrack, 'CMvEffect_LipSync', pidLipSync, { 'xs.n': 'lipSyncEffect' });
-    x.subRef(modelTrack, 'CMvEffect_EyeBlink', pidEyeBlink, { 'xs.n': 'eyeBlinkEffect' });
+    x.sub(modelTrack, 'null', { 'xs.n': 'eyeBlinkEffect' });
     x.sub(modelTrack, 'null', { 'xs.n': 'formEditEffect' });
     const fAnimSet = x.sub(modelTrack, 'FormAnimationSet', { 'xs.n': 'formAnimationSet' });
     x.sub(fAnimSet, 'hash_map', { 'xs.n': 'formMapOnGlobal', count: '0', keyType: 'string' });

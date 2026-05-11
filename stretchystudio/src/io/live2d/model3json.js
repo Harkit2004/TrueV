@@ -18,7 +18,7 @@
  * @property {string}   [physicsFile]   - Relative path to .physics3.json
  * @property {string}   [poseFile]      - Relative path to .pose3.json
  * @property {string}   [displayInfoFile] - Relative path to .cdi3.json
- * @property {Object}   [groups]        - { LipSync: [...paramIds], EyeBlink: [...paramIds] }
+ * @property {Object}   [groups]        - { LipSync: [...paramIds] }
  * @property {Object[]} [hitAreas]      - [{ Id, Name }]
  * @property {{Name:string,File:string}[]} [expressions] - exp3.json paths relative to model root
  */
@@ -73,7 +73,7 @@ export function generateModel3Json(opts) {
     model.FileReferences.Motions = buildMotionGroups(motionFiles);
   }
 
-  // Groups (LipSync, EyeBlink parameter bindings)
+  // Groups (LipSync parameter binding)
   const groupsArray = [];
   for (const [name, ids] of Object.entries(groups)) {
     if (ids && ids.length > 0) {

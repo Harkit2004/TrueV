@@ -296,7 +296,6 @@ Goal: add `ParamAngleX/Y` face parallax matching Hiyori's 3D-rotation illusion. 
 - ParamAngleX/Y face parallax — **shipped Session 19** (single-warp Body-X pattern with artistic layers)
 - ParamAngleZ head tilt — **shipped Session 20** (Face Rotation chained; rotation-deformer local-frame coord-space reverse-engineered)
 - Per-part depth parallax inside the single face warp (spatial depth mapping) — possible refinement
-- Teeth/tongue (oral mesh) — requires user to split mouth into sub-meshes
 
 ### Session 20: ParamAngleZ head tilt — coord-space fix + Neck Warp (2026-04-17)
 

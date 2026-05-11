@@ -40,8 +40,11 @@ source ./.venv/bin/activate
 pip install -r requirements.txt
 touch .env
 nano .env # paste in the required variables
-  SEE_THROUGH_REPO=~/see-through
-  SEE_THROUGH_PYTHON=~/miniconda3/envs/see_through/bin/python
+  SEE_THROUGH_REPO=/root/see-through
+  SEE_THROUGH_PYTHON=/root/miniconda3/envs/see_through/bin/python
+  STRETCHY_STUDIO_ROOT=/root/TrueV/stretchystudio
+  NODE_BIN=/root/.nvm/versions/node/v24.15.0/bin/node
+  HEADLESS_EXPORT_SCRIPT=scripts/headless_live2d_export.mjs
 python run_see_through_worker.py
 
 Start ssh tunnels:

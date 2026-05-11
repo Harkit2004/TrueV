@@ -9,7 +9,7 @@
 
 import { generateModel3Json } from './model3json.js';
 import { generateCdi3Json } from './cdi3json.js';
-import { generateMotion3Json, generateIdleFaceMotion3Json } from './motion3json.js';
+import { generateMotion3Json } from './motion3json.js';
 import { generateExp3Json } from './exp3json.js';
 import { generateMoc3 } from './moc3writer.js';
 import { packTextureAtlas } from './textureAtlas.js';
@@ -22,7 +22,6 @@ import { matchTag } from '../armatureOrganizer.js';
  * @property {string}  modelName   - Base name (e.g. "character")
  * @property {number}  [atlasSize=2048] - Texture atlas size
  * @property {boolean} [exportMotions=true] - Whether to include .motion3.json files
- * @property {boolean} [includeIdleFaceMotion=false] - When true and there are no project.animations, emit motion/idle_face.motion3.json (blink + closed mouth).
  * @property {function} [onProgress] - Progress callback (message: string)
  */
 
@@ -39,7 +38,6 @@ export async function exportLive2D(project, images, opts = {}) {
     modelName = 'model',
     atlasSize = 2048,
     exportMotions = true,
-    includeIdleFaceMotion = false,
     onProgress = () => {},
   } = opts;
 
@@ -113,13 +111,6 @@ export async function exportLive2D(project, images, opts = {}) {
       motionFiles.push(`motion/${filename}`);
     }
   }
-  if (exportMotions && includeIdleFaceMotion && (!project.animations || project.animations.length === 0)) {
-    onProgress('Generating idle face motion...');
-    if (!motionFolder) motionFolder = zip.folder('motion');
-    const idle = generateIdleFaceMotion3Json({ durationMs: 4000, fps: 30 });
-    motionFolder.file('idle_face.motion3.json', JSON.stringify(idle, null, '\t'));
-    motionFiles.push('motion/idle_face.motion3.json');
-  }
 
   const expressionRefs = [];
   const projectExpressions = project.expressions ?? [];
@@ -170,9 +161,6 @@ export async function exportLive2D(project, images, opts = {}) {
 
   const paramIdsForModel3 = new Set((project.parameters ?? []).map((p) => p.id));
   const model3Groups = {};
-  if (paramIdsForModel3.has('ParamEyeLOpen') && paramIdsForModel3.has('ParamEyeROpen')) {
-    model3Groups.EyeBlink = ['ParamEyeLOpen', 'ParamEyeROpen'];
-  }
   if (paramIdsForModel3.has('ParamMouthOpenY')) {
     model3Groups.LipSync = ['ParamMouthOpenY'];
   }
